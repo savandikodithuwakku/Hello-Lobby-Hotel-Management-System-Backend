@@ -22,6 +22,8 @@ export const AUDIT_ENTITIES = Object.freeze({
   RESERVATION: "reservation",
   INVOICE: "invoice",
   TRANSACTION: "transaction",
+  TICKET: "ticket",
+  BAGGAGE: "baggage",
 });
 
 export const AUDIT_ENTITY_VALUES = Object.freeze(Object.values(AUDIT_ENTITIES));
@@ -78,6 +80,17 @@ export const AUDIT_ACTIONS = Object.freeze({
   // The front desk. An override is a manager deciding a rule does not apply
   // this once, which is precisely the kind of thing a log exists for.
   FRONTDESK_OVERRIDE: "frontdesk.override",
+
+  // Guest service.
+  TICKET_CREATED: "ticket.created",
+  TICKET_UPDATED: "ticket.updated",
+  TICKET_ASSIGNED: "ticket.assigned",
+  TICKET_STATUS_CHANGED: "ticket.status_changed",
+
+  // Baggage. Both entries matter for the same reason: the hotel is holding
+  // something that is not its own, and has to be able to say where it went.
+  BAGGAGE_STORED: "baggage.stored",
+  BAGGAGE_COLLECTED: "baggage.collected",
 
   // Money.
   /** Something the guest used was charged to their room. */

@@ -58,6 +58,8 @@ export const PERMISSIONS = Object.freeze({
   FRONTDESK_OVERRIDE_PAYMENT: "frontdesk:override_payment",
   FRONTDESK_TICKET_MANAGE: "frontdesk:ticket_manage",
   FRONTDESK_TICKET_CREATE: "frontdesk:ticket_create",
+  /** Taking baggage in at the desk and handing it back. */
+  FRONTDESK_BAGGAGE_MANAGE: "frontdesk:baggage_manage",
 
   // Customer relationship management
   CRM_FEEDBACK_CREATE: "crm:feedback_create",
