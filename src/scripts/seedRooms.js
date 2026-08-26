@@ -16,6 +16,19 @@ import { USER_ROLES } from "../modules/user/user.constants.js";
 import { ROOM_STATUSES } from "../modules/room/room.constants.js";
 
 /**
+ * Photographs come from Unsplash's image CDN, which serves a stable URL per
+ * photo and resizes it on request. They are stand-ins for the hotel's own
+ * photography - replace the URLs from the room type screen when real photos
+ * exist. The rendering parameters live here so every seeded image is requested
+ * at the same size and quality.
+ */
+const photo = (id, alt, isPrimary = false) => ({
+  url: `https://images.unsplash.com/photo-${id}?auto=format&fit=crop&w=1400&q=80`,
+  alt,
+  isPrimary,
+});
+
+/**
  * The catalogue. Prices are in the currency the app displays (LKR by default);
  * adjust them here or in the UI afterwards.
  */
@@ -27,6 +40,11 @@ const ROOM_TYPES = [
     basePrice: 8000,
     maxOccupancy: 2,
     facilities: ["Air conditioning", "Free Wi-Fi", "Smart TV", "Work desk", "En-suite bathroom"],
+    images: [
+      photo("1631049307264-da0ec9d70304", "Standard room with a queen bed and bedside lamps", true),
+      photo("1522771739844-6a9f6d5f14af", "Bright, uncluttered sleeping area"),
+      photo("1587985064135-0366536eab42", "Standard room seen from the doorway"),
+    ],
   },
   {
     name: "Deluxe",
@@ -42,6 +60,11 @@ const ROOM_TYPES = [
       "Mini bar",
       "Seating area",
       "Tea and coffee",
+    ],
+    images: [
+      photo("1618773928121-c32242e63f39", "Deluxe room with a king bed and panelled headboard", true),
+      photo("1591088398332-8a7791972843", "Seating area and writing desk in a deluxe room"),
+      photo("1611892440504-42a792e24d32", "Deluxe room opening onto a private balcony"),
     ],
   },
   {
@@ -60,6 +83,11 @@ const ROOM_TYPES = [
       "Bathrobes",
       "Executive lounge access",
     ],
+    images: [
+      photo("1566665797739-1674de7a421a", "Luxury room with a king bed and dark timber finishes", true),
+      photo("1578683010236-d716f9a3f461", "Floor-to-ceiling glazing beside the bed"),
+      photo("1590490360182-c33d57733427", "Upholstered seating in a luxury room"),
+    ],
   },
   {
     name: "Family",
@@ -75,6 +103,11 @@ const ROOM_TYPES = [
       "Two bathrooms",
       "Kitchenette",
       "Child cot available",
+    ],
+    images: [
+      photo("1615874959474-d609969a20ed", "Family room bedroom with warm daylight", true),
+      photo("1505693416388-ac5ce068fe85", "The second bedroom of a family room"),
+      photo("1600210492486-724fe5c67fb0", "Shared living space between the two bedrooms"),
     ],
   },
   {
@@ -93,6 +126,11 @@ const ROOM_TYPES = [
       "Bathtub",
       "Espresso machine",
     ],
+    images: [
+      photo("1616594039964-ae9021a400a0", "Suite bedroom with a chandelier and lounge seating", true),
+      photo("1618221195710-dd6b41faaea6", "The suite's separate living room"),
+      photo("1582719478250-c89cae4dc85b", "Bedroom opening onto the terrace"),
+    ],
   },
   {
     name: "Presidential",
@@ -109,6 +147,11 @@ const ROOM_TYPES = [
       "Airport transfer",
       "Jacuzzi",
       "Panoramic view",
+    ],
+    images: [
+      photo("1602002418082-a4443e081dd1", "Presidential suite living room facing the water", true),
+      photo("1613977257363-707ba9348227", "Private terrace and plunge pool"),
+      photo("1566073771259-6a8506099945", "The resort pool reserved for presidential guests"),
     ],
   },
 ];
@@ -164,6 +207,7 @@ const run = async () => {
 
   const typesByName = new Map();
   let typesCreated = 0;
+  let imagesBackfilled = 0;
 
   for (const definition of ROOM_TYPES) {
     // Case-insensitive, matching the uniqueness rule the API enforces.
@@ -173,6 +217,19 @@ const run = async () => {
 
     if (existing) {
       typesByName.set(definition.name, existing);
+
+      // Backfill photographs onto a type seeded before the images existed.
+      // Only when it has none, so photographs chosen in the UI are never
+      // overwritten by re-running the seed.
+      if (existing.images.length === 0 && definition.images?.length) {
+        existing.images = definition.images;
+        existing.updatedBy = owner?._id ?? existing.updatedBy;
+        await existing.save();
+        imagesBackfilled += 1;
+        console.log(`  ~ room type "${definition.name}" already exists, added ${definition.images.length} photographs`);
+        continue;
+      }
+
       console.log(`  = room type "${definition.name}" already exists`);
       continue;
     }
@@ -234,9 +291,13 @@ const run = async () => {
 
   console.log("");
   console.log(`Room types: ${typesCreated} created, ${ROOM_TYPES.length - typesCreated} already present`);
+  if (imagesBackfilled > 0) {
+    console.log(`            ${imagesBackfilled} existing type(s) had photographs added`);
+  }
   console.log(`Rooms:      ${roomsCreated} created, ${roomsSkipped} already present`);
   console.log(`Inventory now holds ${totalRooms} active rooms across ${totalTypes} active types.`);
-  console.log("\nNo photographs are seeded - add image URLs from the room type screen.");
+  console.log("");
+  console.log("Photographs are Unsplash stand-ins - replace them from the room type screen.");
 };
 
 run()
