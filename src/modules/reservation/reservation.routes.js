@@ -10,7 +10,6 @@ import {
   createReservationValidation,
   listReservationsValidation,
   occupancyValidation,
-  recordPaymentValidation,
   reservationIdValidation,
   transitionValidation,
   updateReservationValidation,
@@ -148,16 +147,10 @@ router.post(
 );
 
 /**
- * Records money against a booking. Provisional home: when the payments module
- * lands it will own the gateway, receipts and refunds, and will call
- * `recordPayment` in this service rather than writing to the reservation.
+ * Money is not recorded here. The payments module owns bills, receipts,
+ * refunds and the gateway, and calls `recordPayment` in this module's service
+ * to keep a booking's balance and its confirm-on-advance rule in one place.
+ * See `POST /payments/reservations/:reservationId/payments`.
  */
-router.patch(
-  "/:id/payment",
-  requirePermission(PERMISSIONS.PAYMENT_CREATE),
-  recordPaymentValidation,
-  validateRequest,
-  reservationController.recordPayment
-);
 
 export default router;

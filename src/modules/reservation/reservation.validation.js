@@ -121,12 +121,3 @@ export const cancelReservationValidation = [
   ...reservationIdValidation,
   noteField("reason", "Reason"),
 ];
-
-export const recordPaymentValidation = [
-  ...reservationIdValidation,
-  body("amount")
-    .isFloat({ gt: 0, max: POLICY.MAX_AMOUNT })
-    .withMessage("The payment amount must be greater than zero")
-    .toFloat(),
-  noteField(),
-];

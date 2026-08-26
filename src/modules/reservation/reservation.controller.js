@@ -98,19 +98,3 @@ export const markNoShow = transitionHandler(
   reservationService.markNoShow,
   RESERVATION_MESSAGES.NO_SHOW
 );
-
-/* --------------------------------- Payment -------------------------------- */
-
-export const recordPayment = asyncHandler(async (req, res) => {
-  const result = await reservationService.recordPayment(req.user, req.params.id, req.body);
-
-  sendOk(
-    res,
-    // Paying the advance confirms the booking, so say so rather than leaving
-    // the operator to notice the status changed.
-    result.autoConfirmed
-      ? "Advance received. The reservation is now confirmed."
-      : RESERVATION_MESSAGES.PAYMENT_RECORDED,
-    result
-  );
-});

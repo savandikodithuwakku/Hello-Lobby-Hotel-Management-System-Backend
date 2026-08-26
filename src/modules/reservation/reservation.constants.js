@@ -150,5 +150,4 @@ export const RESERVATION_MESSAGES = Object.freeze({
   CHECKED_OUT: "Guest checked out",
   COMPLETED: "Reservation completed",
   NO_SHOW: "Reservation marked as a no-show",
-  PAYMENT_RECORDED: "Payment recorded",
 });

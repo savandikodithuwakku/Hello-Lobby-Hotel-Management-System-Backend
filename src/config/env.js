@@ -66,6 +66,24 @@ export const env = Object.freeze({
     cookieDomain: process.env.COOKIE_DOMAIN || undefined,
   },
 
+  payment: {
+    /**
+     * Which provider handles online payments.
+     *
+     * `simulated` is the built-in stand-in: it behaves like a real gateway
+     * (redirect, callback, signature check) without an account or a fee, so the
+     * whole online-payment path can be built and demonstrated now. Point this at
+     * a real gateway later and nothing else in the codebase changes.
+     */
+    provider: process.env.PAYMENT_PROVIDER || "simulated",
+    /** Shown on invoices and receipts. The system never converts currencies. */
+    currency: process.env.PAYMENT_CURRENCY || "USD",
+    /** Signs the simulated gateway's callbacks, the way a real gateway would. */
+    simulatorSecret: process.env.PAYMENT_SIMULATOR_SECRET || "",
+    /** Where the guest is sent to complete an online payment. */
+    checkoutPath: process.env.PAYMENT_CHECKOUT_PATH || "/payments/checkout",
+  },
+
   mail: {
     host: process.env.SMTP_HOST || "",
     port: toNumber(process.env.SMTP_PORT, 587),
@@ -114,6 +132,14 @@ export const assertEnvIsValid = () => {
 
   if (env.isProduction && env.jwt.accessSecret.length < 32) {
     throw new Error("JWT_SECRET must be at least 32 characters long in production");
+  }
+
+  // The simulated gateway approves payments on request. That is exactly what is
+  // wanted while building, and a way to give rooms away for free in production.
+  if (env.isProduction && env.payment.provider === "simulated") {
+    throw new Error(
+      "PAYMENT_PROVIDER cannot be 'simulated' in production - configure a real payment gateway"
+    );
   }
 };
 

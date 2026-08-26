@@ -65,6 +65,18 @@ export const refreshRateLimiter = createLimiter({
   message: "Too many token refresh attempts. Please try again shortly.",
 });
 
+/**
+ * Payment provider callbacks. This is the one endpoint in the system that is
+ * open to the internet without a session, so it gets a limit of its own -
+ * generous enough for a real gateway retrying, tight enough that nobody can
+ * sit there guessing signatures.
+ */
+export const paymentCallbackRateLimiter = createLimiter({
+  windowMs: MINUTE,
+  limit: 60,
+  message: "Too many payment callbacks. Please try again shortly.",
+});
+
 /** Broad safety net applied to the whole API. */
 export const globalRateLimiter = createLimiter({
   windowMs: 15 * MINUTE,

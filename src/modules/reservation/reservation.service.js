@@ -651,3 +651,43 @@ export const recordPayment = async (actor, id, { amount, note = "" }) => {
     note,
   };
 };
+
+/**
+ * Takes money back off a booking after a refund has gone out.
+ *
+ * The counterpart to `recordPayment`, and the payments module is the only
+ * caller. What the booking stores is the net figure - what the guest has paid
+ * and kept - so a refund lowers it. The full history of who paid what and when
+ * lives in the payments module's ledger, not here.
+ *
+ * A refund never changes the booking's status. Cancelling is a separate
+ * decision with its own rules, and refunding a guest is not the same as calling
+ * their stay off.
+ */
+export const recordRefund = async (actor, id, { amount, note = "" }) => {
+  const reservation = await findReservationOrFail(id);
+
+  const value = money(amount);
+
+  if (value <= 0) {
+    throw new ApiError(400, "A refund must be greater than zero");
+  }
+
+  if (value > reservation.payment.amountPaid) {
+    throw new ApiError(
+      400,
+      `That is more than the ${reservation.payment.amountPaid} received on this reservation`
+    );
+  }
+
+  reservation.payment.amountPaid = money(reservation.payment.amountPaid - value);
+  reservation.updatedBy = actor._id;
+
+  await reservation.save();
+
+  return {
+    reservation: await getReservationById(reservation._id, actor),
+    refunded: value,
+    note,
+  };
+};
