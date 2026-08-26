@@ -1,11 +1,12 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { toId } from "../../shared/utils/id.util.js";
+import { paginateQuery } from "../../shared/utils/pagination.util.js";
+import { containsInsensitive } from "../../shared/utils/text.util.js";
 import Room from "./room.model.js";
 import RoomType from "./roomType.model.js";
 import {
   BOOKABLE_STATUSES,
-  DEFAULT_PAGE_SIZE,
   DEFAULT_ROOM_SORT,
-  MAX_PAGE_SIZE,
   RELEASE_STATUS,
   RESERVATION_CONTROLLED_STATUSES,
   ROOM_STATUSES,
@@ -13,8 +14,6 @@ import {
   canTransitionManually,
   getAllowedTransitions,
 } from "./room.constants.js";
-
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Every read populates the type: price and facilities fall back to it. */
 const withType = (query) =>
@@ -59,8 +58,8 @@ const applyStatus = (room, status, { note, actorId = null } = {}) => {
 /* -------------------------------------------------------------------------- */
 
 export const listRooms = async ({
-  page = 1,
-  limit = DEFAULT_PAGE_SIZE,
+  page,
+  limit,
   search,
   roomType,
   status,
@@ -76,7 +75,7 @@ export const listRooms = async ({
   if (status) filter.status = status;
   if (roomType) filter.roomType = roomType;
   if (floor !== undefined) filter.floor = floor;
-  if (search) filter.roomNumber = new RegExp(escapeRegex(search), "i");
+  if (search) filter.roomNumber = containsInsensitive(search);
 
   // Price filtering has to consider rooms that inherit their type's base price,
   // so the two cases are expressed as one OR: an explicit price in range, or no
@@ -91,28 +90,14 @@ export const listRooms = async ({
     filter.$or = [{ price: range }, { price: null, roomType: { $in: typeIds } }];
   }
 
-  const safeLimit = Math.min(Number(limit) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-  const safePage = Math.max(Number(page) || 1, 1);
+  const { documents, pagination } = await paginateQuery(Room, filter, {
+    page,
+    limit,
+    sort,
+    decorate: withType,
+  });
 
-  const [rooms, total] = await Promise.all([
-    withType(
-      Room.find(filter)
-        .sort(sort)
-        .skip((safePage - 1) * safeLimit)
-        .limit(safeLimit)
-    ),
-    Room.countDocuments(filter),
-  ]);
-
-  return {
-    rooms: rooms.map((room) => room.toSafeObject()),
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total,
-      totalPages: Math.ceil(total / safeLimit) || 1,
-    },
-  };
+  return { rooms: documents.map((room) => room.toSafeObject()), pagination };
 };
 
 /**
@@ -257,7 +242,7 @@ export const updateRoom = async (actor, id, { roomNumber, roomType, floor, price
     }
   }
 
-  if (roomType !== undefined && String(roomType) !== String(room.roomType?._id ?? room.roomType)) {
+  if (roomType !== undefined && String(roomType) !== String(toId(room.roomType))) {
     if (room.isInUse()) {
       throw new ApiError(409, "A reserved or occupied room cannot change its type");
     }
@@ -366,7 +351,7 @@ export const restoreRoom = async (actor, id) => {
     return getRoomById(room._id);
   }
 
-  const roomType = await RoomType.findById(room.roomType?._id ?? room.roomType);
+  const roomType = await RoomType.findById(toId(room.roomType));
 
   if (!roomType?.isActive) {
     throw new ApiError(

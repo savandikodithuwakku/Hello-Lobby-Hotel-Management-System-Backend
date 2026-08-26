@@ -1,5 +1,6 @@
-import ApiResponse from "../../shared/utils/ApiResponse.js";
+import { sendCreated, sendOk } from "../../shared/utils/ApiResponse.js";
 import asyncHandler from "../../shared/utils/asyncHandler.js";
+import { toDateString } from "../../shared/utils/date.util.js";
 import * as reservationService from "./reservation.service.js";
 import * as availabilityService from "./availability.service.js";
 import { RESERVATION_MESSAGES } from "./reservation.constants.js";
@@ -8,20 +9,12 @@ import { RESERVATION_MESSAGES } from "./reservation.constants.js";
 
 export const checkAvailability = asyncHandler(async (req, res) => {
   const result = await availabilityService.findAvailableRooms(req.validatedQuery);
-  res
-    .status(200)
-    .json(
-      new ApiResponse(
-        200,
-        `${result.total} room(s) available for those dates`,
-        result
-      )
-    );
+  sendOk(res, `${result.total} room(s) available for those dates`, result);
 });
 
 export const getOccupancy = asyncHandler(async (req, res) => {
   const result = await availabilityService.getOccupancyForRange(req.validatedQuery);
-  res.status(200).json(new ApiResponse(200, "Occupancy fetched successfully", result));
+  sendOk(res, "Occupancy fetched successfully", result);
 });
 
 /* ------------------------------- Reservations ----------------------------- */
@@ -29,88 +22,95 @@ export const getOccupancy = asyncHandler(async (req, res) => {
 export const listReservations = asyncHandler(async (req, res) => {
   // The service scopes the list to the caller when they may only read their own.
   const result = await reservationService.listReservations(req.validatedQuery, req.user);
-  res.status(200).json(new ApiResponse(200, "Reservations fetched successfully", result));
+  sendOk(res, "Reservations fetched successfully", result);
 });
 
 export const getReservationStatistics = asyncHandler(async (req, res) => {
   const statistics = await reservationService.getReservationStatistics();
-  res.status(200).json(new ApiResponse(200, "Reservation statistics fetched", statistics));
+  sendOk(res, "Reservation statistics fetched", statistics);
 });
 
 export const getReservation = asyncHandler(async (req, res) => {
   const reservation = await reservationService.getReservationById(req.params.id, req.user);
-  res.status(200).json(new ApiResponse(200, "Reservation fetched successfully", { reservation }));
+  sendOk(res, "Reservation fetched successfully", { reservation });
 });
 
 export const getReservationHistory = asyncHandler(async (req, res) => {
   const result = await reservationService.getReservationHistory(req.params.id, req.user);
-  res.status(200).json(new ApiResponse(200, "Reservation history fetched", result));
+  sendOk(res, "Reservation history fetched", result);
 });
 
 export const createReservation = asyncHandler(async (req, res) => {
   const reservation = await reservationService.createReservation(req.user, req.body);
-  res.status(201).json(
-    new ApiResponse(
-      201,
-      `${RESERVATION_MESSAGES.CREATED}. Pay ${reservation.payment.advanceAmount} by ` +
-        `${reservation.payment.advanceDeadline.toISOString().slice(0, 10)} to confirm it.`,
-      { reservation }
-    )
+
+  sendCreated(
+    res,
+    `${RESERVATION_MESSAGES.CREATED}. Pay ${reservation.payment.advanceAmount} by ` +
+      `${toDateString(reservation.payment.advanceDeadline)} to confirm it.`,
+    { reservation }
   );
 });
 
 export const updateReservation = asyncHandler(async (req, res) => {
   const reservation = await reservationService.updateReservation(req.user, req.params.id, req.body);
-  res.status(200).json(new ApiResponse(200, RESERVATION_MESSAGES.UPDATED, { reservation }));
+  sendOk(res, RESERVATION_MESSAGES.UPDATED, { reservation });
 });
 
-export const confirmReservation = asyncHandler(async (req, res) => {
-  const reservation = await reservationService.confirmReservation(req.user, req.params.id, req.body);
-  res.status(200).json(new ApiResponse(200, RESERVATION_MESSAGES.CONFIRMED, { reservation }));
-});
+/* ------------------------- Status transitions ----------------------------- */
 
-export const cancelReservation = asyncHandler(async (req, res) => {
-  const reservation = await reservationService.cancelReservation(req.user, req.params.id, req.body);
-  res.status(200).json(new ApiResponse(200, RESERVATION_MESSAGES.CANCELLED, { reservation }));
-});
+/**
+ * Every transition endpoint does the same three things: call its service
+ * function, report the module's standard message, and return the reservation.
+ * They are built from one factory so a new transition is a single line.
+ */
+const transitionHandler = (transition, message) =>
+  asyncHandler(async (req, res) => {
+    const reservation = await transition(req.user, req.params.id, req.body);
+    sendOk(res, message, { reservation });
+  });
 
-export const checkIn = asyncHandler(async (req, res) => {
-  const reservation = await reservationService.checkInReservation(req.user, req.params.id, req.body);
-  res.status(200).json(new ApiResponse(200, RESERVATION_MESSAGES.CHECKED_IN, { reservation }));
-});
+export const confirmReservation = transitionHandler(
+  reservationService.confirmReservation,
+  RESERVATION_MESSAGES.CONFIRMED
+);
 
-export const checkOut = asyncHandler(async (req, res) => {
-  const reservation = await reservationService.checkOutReservation(
-    req.user,
-    req.params.id,
-    req.body
-  );
-  res.status(200).json(new ApiResponse(200, RESERVATION_MESSAGES.CHECKED_OUT, { reservation }));
-});
+export const cancelReservation = transitionHandler(
+  reservationService.cancelReservation,
+  RESERVATION_MESSAGES.CANCELLED
+);
 
-export const completeReservation = asyncHandler(async (req, res) => {
-  const reservation = await reservationService.completeReservation(
-    req.user,
-    req.params.id,
-    req.body
-  );
-  res.status(200).json(new ApiResponse(200, RESERVATION_MESSAGES.COMPLETED, { reservation }));
-});
+export const checkIn = transitionHandler(
+  reservationService.checkInReservation,
+  RESERVATION_MESSAGES.CHECKED_IN
+);
 
-export const markNoShow = asyncHandler(async (req, res) => {
-  const reservation = await reservationService.markNoShow(req.user, req.params.id, req.body);
-  res.status(200).json(new ApiResponse(200, RESERVATION_MESSAGES.NO_SHOW, { reservation }));
-});
+export const checkOut = transitionHandler(
+  reservationService.checkOutReservation,
+  RESERVATION_MESSAGES.CHECKED_OUT
+);
+
+export const completeReservation = transitionHandler(
+  reservationService.completeReservation,
+  RESERVATION_MESSAGES.COMPLETED
+);
+
+export const markNoShow = transitionHandler(
+  reservationService.markNoShow,
+  RESERVATION_MESSAGES.NO_SHOW
+);
+
+/* --------------------------------- Payment -------------------------------- */
 
 export const recordPayment = asyncHandler(async (req, res) => {
   const result = await reservationService.recordPayment(req.user, req.params.id, req.body);
-  res.status(200).json(
-    new ApiResponse(
-      200,
-      result.autoConfirmed
-        ? "Advance received. The reservation is now confirmed."
-        : RESERVATION_MESSAGES.PAYMENT_RECORDED,
-      result
-    )
+
+  sendOk(
+    res,
+    // Paying the advance confirms the booking, so say so rather than leaving
+    // the operator to notice the status changed.
+    result.autoConfirmed
+      ? "Advance received. The reservation is now confirmed."
+      : RESERVATION_MESSAGES.PAYMENT_RECORDED,
+    result
   );
 });

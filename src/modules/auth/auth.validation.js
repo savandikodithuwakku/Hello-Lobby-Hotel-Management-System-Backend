@@ -1,4 +1,10 @@
 import { body, param } from "express-validator";
+import {
+  avatarBody,
+  mongoIdParam,
+  nameBody,
+  phoneBody,
+} from "../../shared/validators/common.validators.js";
 import { PASSWORD_RULE_MESSAGE, isStrongPassword } from "./utils/password.util.js";
 
 /**
@@ -47,20 +53,11 @@ const tokenParam = (label) =>
     .withMessage(`Invalid ${label} token`);
 
 export const registerValidation = [
-  body("name")
-    .trim()
-    .notEmpty()
-    .withMessage("Name is required")
-    .isLength({ min: 2, max: 80 })
-    .withMessage("Name must be between 2 and 80 characters"),
+  nameBody(),
   emailField(),
   passwordField("password"),
   confirmationField("confirmPassword", "password"),
-  body("phone")
-    .optional({ values: "falsy" })
-    .trim()
-    .isLength({ min: 7, max: 20 })
-    .withMessage("Phone number must be between 7 and 20 characters"),
+  phoneBody(),
   // Role and status can never be set by the client during self-registration.
   body(["role", "status", "extraPermissions", "deniedPermissions"]).customSanitizer(() => undefined),
 ];
@@ -88,19 +85,9 @@ export const changePasswordValidation = [
 ];
 
 export const updateProfileValidation = [
-  body("name")
-    .optional()
-    .trim()
-    .isLength({ min: 2, max: 80 })
-    .withMessage("Name must be between 2 and 80 characters"),
-  body("phone")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ min: 7, max: 20 })
-    .withMessage("Phone number must be between 7 and 20 characters"),
-  body("avatar").optional({ values: "null" }).trim().isURL().withMessage("Avatar must be a valid URL"),
+  nameBody({ optional: true }),
+  phoneBody({ clearable: true }),
+  avatarBody(),
 ];
 
-export const sessionIdValidation = [
-  param("sessionId").isMongoId().withMessage("Invalid session id"),
-];
+export const sessionIdValidation = mongoIdParam("sessionId", "session");

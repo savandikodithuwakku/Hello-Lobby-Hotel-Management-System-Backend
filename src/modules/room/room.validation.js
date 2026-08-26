@@ -1,4 +1,17 @@
-import { body, param, query } from "express-validator";
+import { body, query } from "express-validator";
+import {
+  amountQuery,
+  booleanQuery,
+  intQuery,
+  mongoIdBody,
+  mongoIdParam,
+  mongoIdQuery,
+  noteBody,
+  paginationRules,
+  searchRule,
+  sortRule,
+  stripFields,
+} from "../../shared/validators/common.validators.js";
 import {
   LIMITS,
   ROOM_SORT_OPTIONS,
@@ -7,23 +20,23 @@ import {
 } from "./room.constants.js";
 
 /* -------------------------------------------------------------------------- */
-/* Shared field builders                                                      */
+/* Field builders used by more than one endpoint in this module               */
 /* -------------------------------------------------------------------------- */
 
-/** Query flags arrive as strings; "any" is expressed by leaving them out. */
-const booleanQuery = (field) =>
-  query(field)
-    .optional()
-    .isBoolean()
-    .withMessage(`${field} must be true or false`)
-    .toBoolean();
+const floorQuery = () =>
+  intQuery("floor", { min: LIMITS.MIN_FLOOR, max: LIMITS.MAX_FLOOR, message: "Floor is out of range" });
 
-const positiveNumberQuery = (field, label) =>
-  query(field)
-    .optional()
-    .isFloat({ min: 0, max: LIMITS.MAX_PRICE })
-    .withMessage(`${label} must be a positive amount`)
-    .toFloat();
+const occupancyQuery = () =>
+  intQuery("occupancy", {
+    min: 1,
+    max: LIMITS.MAX_OCCUPANCY,
+    message: "Occupancy must be a whole number of guests",
+  });
+
+const priceRangeQueries = () => [
+  amountQuery("minPrice", "Minimum price", LIMITS.MAX_PRICE),
+  amountQuery("maxPrice", "Maximum price", LIMITS.MAX_PRICE),
+];
 
 const facilitiesField = () =>
   body("facilities")
@@ -59,80 +72,74 @@ const imagesField = () =>
     )
     .withMessage("Each image needs a valid URL and an optional short description");
 
-export const roomTypeIdValidation = [param("id").isMongoId().withMessage("Invalid room type id")];
-export const roomIdValidation = [param("id").isMongoId().withMessage("Invalid room id")];
+const roomStatusBody = ({ optional = false } = {}) => {
+  const chain = optional ? body("status").optional() : body("status");
+  return chain.isIn(ROOM_STATUS_VALUES).withMessage("Unknown room status");
+};
+
+const statusNoteBody = (field = "note", label = "Note") => noteBody(field, LIMITS.NOTE_MAX, label);
+
+export const roomTypeIdValidation = mongoIdParam("id", "room type");
+export const roomIdValidation = mongoIdParam("id", "room");
 
 /* -------------------------------------------------------------------------- */
 /* Room types                                                                 */
 /* -------------------------------------------------------------------------- */
 
-export const listRoomTypesValidation = [
-  query("page").optional().isInt({ min: 1 }).withMessage("page must be a positive integer").toInt(),
-  query("limit")
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage("limit must be between 1 and 100")
-    .toInt(),
-  query("search").optional().trim().isLength({ max: 80 }).withMessage("Search term is too long"),
-  booleanQuery("isActive"),
-  positiveNumberQuery("minPrice", "Minimum price"),
-  positiveNumberQuery("maxPrice", "Maximum price"),
-  query("occupancy")
-    .optional()
+const roomTypeNameBody = ({ optional = false } = {}) => {
+  const chain = optional ? body("name").optional() : body("name");
+  return chain
+    .trim()
+    .isLength({ min: LIMITS.NAME_MIN, max: LIMITS.NAME_MAX })
+    .withMessage(`Name must be between ${LIMITS.NAME_MIN} and ${LIMITS.NAME_MAX} characters`);
+};
+
+const descriptionBody = () => noteBody("description", LIMITS.DESCRIPTION_MAX, "Description");
+
+const basePriceBody = ({ optional = false } = {}) => {
+  const chain = optional ? body("basePrice").optional() : body("basePrice");
+  return chain
+    .isFloat({ min: 0, max: LIMITS.MAX_PRICE })
+    .withMessage("Base price must be a positive amount")
+    .toFloat();
+};
+
+const maxOccupancyBody = ({ optional = false } = {}) => {
+  const chain = optional ? body("maxOccupancy").optional() : body("maxOccupancy");
+  return chain
     .isInt({ min: 1, max: LIMITS.MAX_OCCUPANCY })
-    .withMessage("Occupancy must be a whole number of guests")
-    .toInt(),
-  query("sort").optional().isIn(ROOM_TYPE_SORT_OPTIONS).withMessage("Unsupported sort option"),
+    .withMessage(`Maximum occupancy must be between 1 and ${LIMITS.MAX_OCCUPANCY} guests`)
+    .toInt();
+};
+
+export const listRoomTypesValidation = [
+  ...paginationRules(),
+  searchRule(80),
+  booleanQuery("isActive"),
+  ...priceRangeQueries(),
+  occupancyQuery(),
+  sortRule(ROOM_TYPE_SORT_OPTIONS),
 ];
 
 export const createRoomTypeValidation = [
-  body("name")
-    .trim()
-    .isLength({ min: LIMITS.NAME_MIN, max: LIMITS.NAME_MAX })
-    .withMessage("Name must be between 2 and 60 characters"),
-  body("description")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: LIMITS.DESCRIPTION_MAX })
-    .withMessage("Description is too long"),
-  body("basePrice")
-    .isFloat({ min: 0, max: LIMITS.MAX_PRICE })
-    .withMessage("Base price must be a positive amount")
-    .toFloat(),
-  body("maxOccupancy")
-    .isInt({ min: 1, max: LIMITS.MAX_OCCUPANCY })
-    .withMessage(`Maximum occupancy must be between 1 and ${LIMITS.MAX_OCCUPANCY} guests`)
-    .toInt(),
+  roomTypeNameBody(),
+  descriptionBody(),
+  basePriceBody(),
+  maxOccupancyBody(),
   facilitiesField(),
   imagesField(),
 ];
 
 export const updateRoomTypeValidation = [
   ...roomTypeIdValidation,
-  body("name")
-    .optional()
-    .trim()
-    .isLength({ min: LIMITS.NAME_MIN, max: LIMITS.NAME_MAX })
-    .withMessage("Name must be between 2 and 60 characters"),
-  body("description")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: LIMITS.DESCRIPTION_MAX })
-    .withMessage("Description is too long"),
-  body("basePrice")
-    .optional()
-    .isFloat({ min: 0, max: LIMITS.MAX_PRICE })
-    .withMessage("Base price must be a positive amount")
-    .toFloat(),
-  body("maxOccupancy")
-    .optional()
-    .isInt({ min: 1, max: LIMITS.MAX_OCCUPANCY })
-    .withMessage(`Maximum occupancy must be between 1 and ${LIMITS.MAX_OCCUPANCY} guests`)
-    .toInt(),
+  roomTypeNameBody({ optional: true }),
+  descriptionBody(),
+  basePriceBody({ optional: true }),
+  maxOccupancyBody({ optional: true }),
   facilitiesField(),
   imagesField(),
   // Activation has its own endpoints; it must not ride along on a field patch.
-  body("isActive").customSanitizer(() => undefined),
+  stripFields("isActive"),
 ];
 
 /* -------------------------------------------------------------------------- */
@@ -140,43 +147,25 @@ export const updateRoomTypeValidation = [
 /* -------------------------------------------------------------------------- */
 
 export const listRoomsValidation = [
-  query("page").optional().isInt({ min: 1 }).withMessage("page must be a positive integer").toInt(),
-  query("limit")
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage("limit must be between 1 and 100")
-    .toInt(),
-  query("search").optional().trim().isLength({ max: 20 }).withMessage("Search term is too long"),
-  query("roomType").optional().isMongoId().withMessage("Invalid room type filter"),
+  ...paginationRules(),
+  // Room numbers are short, so a long search term is certainly a mistake.
+  searchRule(20),
+  mongoIdQuery("roomType", "Invalid room type filter"),
   query("status").optional().isIn(ROOM_STATUS_VALUES).withMessage("Unknown room status"),
-  query("floor")
-    .optional()
-    .isInt({ min: LIMITS.MIN_FLOOR, max: LIMITS.MAX_FLOOR })
-    .withMessage("Floor is out of range")
-    .toInt(),
+  floorQuery(),
   booleanQuery("isActive"),
-  positiveNumberQuery("minPrice", "Minimum price"),
-  positiveNumberQuery("maxPrice", "Maximum price"),
-  query("sort").optional().isIn(ROOM_SORT_OPTIONS).withMessage("Unsupported sort option"),
+  ...priceRangeQueries(),
+  sortRule(ROOM_SORT_OPTIONS),
 ];
 
 export const availableRoomsValidation = [
-  query("roomType").optional().isMongoId().withMessage("Invalid room type filter"),
-  query("floor")
-    .optional()
-    .isInt({ min: LIMITS.MIN_FLOOR, max: LIMITS.MAX_FLOOR })
-    .withMessage("Floor is out of range")
-    .toInt(),
-  query("occupancy")
-    .optional()
-    .isInt({ min: 1, max: LIMITS.MAX_OCCUPANCY })
-    .withMessage("Occupancy must be a whole number of guests")
-    .toInt(),
+  mongoIdQuery("roomType", "Invalid room type filter"),
+  floorQuery(),
+  occupancyQuery(),
 ];
 
-const roomNumberField = (optional = false) => {
-  const field = body("roomNumber");
-  const chain = optional ? field.optional() : field;
+const roomNumberField = ({ optional = false } = {}) => {
+  const chain = optional ? body("roomNumber").optional() : body("roomNumber");
 
   return chain
     .trim()
@@ -196,53 +185,39 @@ const priceOverrideField = () =>
     .withMessage("Price must be a positive amount, or null to follow the room type")
     .customSanitizer((value) => (value === null ? null : Number(value)));
 
-export const createRoomValidation = [
-  roomNumberField(),
-  body("roomType").isMongoId().withMessage("A valid room type is required"),
-  body("floor")
+const floorBody = ({ optional = false } = {}) => {
+  const chain = optional ? body("floor").optional() : body("floor");
+  return chain
     .isInt({ min: LIMITS.MIN_FLOOR, max: LIMITS.MAX_FLOOR })
     .withMessage("Floor is out of range")
-    .toInt(),
+    .toInt();
+};
+
+export const createRoomValidation = [
+  roomNumberField(),
+  mongoIdBody("roomType", "A valid room type is required"),
+  floorBody(),
   priceOverrideField(),
   facilitiesField(),
-  body("status").optional().isIn(ROOM_STATUS_VALUES).withMessage("Unknown room status"),
-  body("statusNote")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: LIMITS.NOTE_MAX })
-    .withMessage("Status note is too long"),
+  roomStatusBody({ optional: true }),
+  statusNoteBody("statusNote", "Status note"),
 ];
 
 export const updateRoomValidation = [
   ...roomIdValidation,
-  roomNumberField(true),
-  body("roomType").optional().isMongoId().withMessage("A valid room type is required"),
-  body("floor")
-    .optional()
-    .isInt({ min: LIMITS.MIN_FLOOR, max: LIMITS.MAX_FLOOR })
-    .withMessage("Floor is out of range")
-    .toInt(),
+  roomNumberField({ optional: true }),
+  mongoIdBody("roomType", "A valid room type is required", { optional: true }),
+  floorBody({ optional: true }),
   priceOverrideField(),
   facilitiesField(),
   // Status and activation are state transitions with their own rules.
-  body(["status", "isActive"]).customSanitizer(() => undefined),
+  stripFields("status", "isActive"),
 ];
 
 export const changeRoomStatusValidation = [
   ...roomIdValidation,
-  body("status").isIn(ROOM_STATUS_VALUES).withMessage("Unknown room status"),
-  body("note")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: LIMITS.NOTE_MAX })
-    .withMessage("Note is too long"),
+  roomStatusBody(),
+  statusNoteBody(),
 ];
 
-export const deactivateRoomValidation = [
-  ...roomIdValidation,
-  body("note")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: LIMITS.NOTE_MAX })
-    .withMessage("Note is too long"),
-];
+export const deactivateRoomValidation = [...roomIdValidation, statusNoteBody()];

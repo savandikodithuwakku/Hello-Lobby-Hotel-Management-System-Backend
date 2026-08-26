@@ -1,89 +1,79 @@
-import { body, param, query } from "express-validator";
-import { PERMISSION_VALUES } from "../auth/rbac/permissions.js";
+import { body, query } from "express-validator";
 import {
-  MAX_PAGE_SIZE,
-  USER_ROLE_VALUES,
-  USER_SORT_OPTIONS,
-  USER_STATUS_VALUES,
-} from "./user.constants.js";
+  avatarBody,
+  mongoIdParam,
+  nameBody,
+  paginationRules,
+  phoneBody,
+  searchRule,
+  sortRule,
+} from "../../shared/validators/common.validators.js";
+import { PERMISSION_VALUES } from "../auth/rbac/permissions.js";
+import { USER_ROLE_VALUES, USER_SORT_OPTIONS, USER_STATUS_VALUES } from "./user.constants.js";
 
-export const userIdValidation = [param("id").isMongoId().withMessage("Invalid user id")];
+export const userIdValidation = mongoIdParam("id", "user");
 
 /**
  * Address fields are always optional and may be sent as null to clear them.
  * Declared once so create and update can never validate the same field
  * differently.
  */
+const addressLine = (field, label, maxLength) =>
+  body(`address.${field}`)
+    .optional({ values: "null" })
+    .trim()
+    .isLength({ max: maxLength })
+    .withMessage(`${label} must not exceed ${maxLength} characters`);
+
 const addressValidation = [
   body("address").optional({ values: "null" }).isObject().withMessage("address must be an object"),
-  body("address.line1")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: 120 })
-    .withMessage("Address line 1 must not exceed 120 characters"),
-  body("address.line2")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: 120 })
-    .withMessage("Address line 2 must not exceed 120 characters"),
-  body("address.city")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: 80 })
-    .withMessage("City must not exceed 80 characters"),
-  body("address.state")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: 80 })
-    .withMessage("State or province must not exceed 80 characters"),
-  body("address.postalCode")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: 20 })
-    .withMessage("Postal code must not exceed 20 characters"),
-  body("address.country")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: 80 })
-    .withMessage("Country must not exceed 80 characters"),
+  addressLine("line1", "Address line 1", 120),
+  addressLine("line2", "Address line 2", 120),
+  addressLine("city", "City", 80),
+  addressLine("state", "State or province", 80),
+  addressLine("postalCode", "Postal code", 20),
+  addressLine("country", "Country", 80),
 ];
 
-export const listUsersValidation = [
-  query("page").optional().isInt({ min: 1 }).withMessage("page must be a positive integer").toInt(),
-  query("limit")
+const roleBody = () => body("role").isIn(USER_ROLE_VALUES).withMessage("Unknown role");
+
+/** Checks that every entry in a permissions array is one the system knows. */
+const permissionsBody = (field) =>
+  body(field)
     .optional()
-    .isInt({ min: 1, max: MAX_PAGE_SIZE })
-    .withMessage(`limit must be between 1 and ${MAX_PAGE_SIZE}`)
-    .toInt(),
+    .isArray()
+    .withMessage(`${field} must be an array`)
+    .custom((values) => values.every((value) => PERMISSION_VALUES.includes(value)))
+    .withMessage(`${field} contains an unknown permission`);
+
+export const listUsersValidation = [
+  ...paginationRules(),
   query("role").optional().isIn(USER_ROLE_VALUES).withMessage("Unknown role"),
   query("status").optional().isIn(USER_STATUS_VALUES).withMessage("Unknown status"),
-  query("search").optional().trim().isLength({ max: 80 }).withMessage("Search term is too long"),
-  query("sort").optional().isIn(USER_SORT_OPTIONS).withMessage("Unsupported sort option"),
+  searchRule(80),
+  sortRule(USER_SORT_OPTIONS),
 ];
 
 export const createUserValidation = [
-  body("name").trim().isLength({ min: 2, max: 80 }).withMessage("Name must be between 2 and 80 characters"),
+  nameBody(),
   body("email").trim().isEmail().withMessage("A valid email address is required").normalizeEmail({
     gmail_remove_dots: false,
     gmail_remove_subaddress: false,
   }),
-  body("role").isIn(USER_ROLE_VALUES).withMessage("Unknown role"),
-  body("phone").optional({ values: "falsy" }).trim().isLength({ min: 7, max: 20 }).withMessage("Invalid phone number"),
+  roleBody(),
+  phoneBody(),
   ...addressValidation,
 ];
 
 export const updateUserValidation = [
   ...userIdValidation,
-  body("name").optional().trim().isLength({ min: 2, max: 80 }).withMessage("Name must be between 2 and 80 characters"),
-  body("phone").optional({ values: "null" }).trim().isLength({ min: 7, max: 20 }).withMessage("Invalid phone number"),
-  body("avatar").optional({ values: "null" }).trim().isURL().withMessage("Avatar must be a valid URL"),
+  nameBody({ optional: true }),
+  phoneBody({ clearable: true }),
+  avatarBody(),
   ...addressValidation,
 ];
 
-export const changeRoleValidation = [
-  ...userIdValidation,
-  body("role").isIn(USER_ROLE_VALUES).withMessage("Unknown role"),
-];
+export const changeRoleValidation = [...userIdValidation, roleBody()];
 
 export const changeStatusValidation = [
   ...userIdValidation,
@@ -92,18 +82,8 @@ export const changeStatusValidation = [
 
 export const changePermissionsValidation = [
   ...userIdValidation,
-  body("extraPermissions")
-    .optional()
-    .isArray()
-    .withMessage("extraPermissions must be an array")
-    .custom((values) => values.every((value) => PERMISSION_VALUES.includes(value)))
-    .withMessage("extraPermissions contains an unknown permission"),
-  body("deniedPermissions")
-    .optional()
-    .isArray()
-    .withMessage("deniedPermissions must be an array")
-    .custom((values) => values.every((value) => PERMISSION_VALUES.includes(value)))
-    .withMessage("deniedPermissions contains an unknown permission"),
+  permissionsBody("extraPermissions"),
+  permissionsBody("deniedPermissions"),
 ];
 
 /**

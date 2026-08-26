@@ -1,12 +1,10 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { paginateQuery } from "../../shared/utils/pagination.util.js";
+import { containsInsensitive, equalsInsensitive } from "../../shared/utils/text.util.js";
 import { PERMISSIONS } from "../auth/rbac/permissions.js";
 import RoomType from "./roomType.model.js";
 import Room from "./room.model.js";
-import {
-  DEFAULT_PAGE_SIZE,
-  DEFAULT_ROOM_TYPE_SORT,
-  MAX_PAGE_SIZE,
-} from "./room.constants.js";
+import { DEFAULT_ROOM_TYPE_SORT } from "./room.constants.js";
 
 /**
  * Whether the caller works here.
@@ -19,11 +17,7 @@ import {
 const canSeeInventory = (viewer) => Boolean(viewer?.hasPermission(PERMISSIONS.ROOM_READ));
 
 /** Case-insensitive exact match, so "Deluxe" collides with "deluxe". */
-const byName = (name) => ({ name: new RegExp(`^${escapeRegex(name.trim())}$`, "i") });
-
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
+const byName = (name) => ({ name: equalsInsensitive(name) });
 
 const findTypeOrFail = async (id) => {
   const roomType = await RoomType.findById(id);
@@ -47,8 +41,8 @@ const countRoomsByType = async (typeIds) => {
 
 export const listRoomTypes = async (
   {
-    page = 1,
-    limit = DEFAULT_PAGE_SIZE,
+    page,
+    limit,
     search,
     isActive,
     minPrice,
@@ -71,7 +65,7 @@ export const listRoomTypes = async (
   }
 
   if (search) {
-    const pattern = new RegExp(escapeRegex(search), "i");
+    const pattern = containsInsensitive(search);
     filter.$or = [{ name: pattern }, { description: pattern }];
   }
 
@@ -84,16 +78,11 @@ export const listRoomTypes = async (
   // "Fits 4 guests" means a type whose maximum is at least 4.
   if (occupancy !== undefined) filter.maxOccupancy = { $gte: occupancy };
 
-  const safeLimit = Math.min(Number(limit) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-  const safePage = Math.max(Number(page) || 1, 1);
-
-  const [roomTypes, total] = await Promise.all([
-    RoomType.find(filter)
-      .sort(sort)
-      .skip((safePage - 1) * safeLimit)
-      .limit(safeLimit),
-    RoomType.countDocuments(filter),
-  ]);
+  const { documents: roomTypes, pagination } = await paginateQuery(RoomType, filter, {
+    page,
+    limit,
+    sort,
+  });
 
   const roomCounts = staffView
     ? await countRoomsByType(roomTypes.map((type) => type._id))
@@ -105,12 +94,7 @@ export const listRoomTypes = async (
         ? type.toSafeObject({ roomCount: roomCounts.get(type._id.toString()) || 0 })
         : type.toPublicObject()
     ),
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total,
-      totalPages: Math.ceil(total / safeLimit) || 1,
-    },
+    pagination,
   };
 };
 

@@ -1,29 +1,30 @@
-import { body, param, query } from "express-validator";
+import { body, query } from "express-validator";
 import {
-  POLICY,
-  RESERVATION_SORT_OPTIONS,
-  RESERVATION_STATUS_VALUES,
-} from "./reservation.constants.js";
+  intQuery,
+  mongoIdBody,
+  mongoIdParam,
+  mongoIdQuery,
+  noteBody,
+  paginationRules,
+  searchRule,
+  sortRule,
+  stripFields,
+} from "../../shared/validators/common.validators.js";
+import { POLICY, RESERVATION_SORT_OPTIONS, RESERVATION_STATUS_VALUES } from "./reservation.constants.js";
 
-export const reservationIdValidation = [
-  param("id").isMongoId().withMessage("Invalid reservation id"),
-];
+export const reservationIdValidation = mongoIdParam("id", "reservation");
 
-const noteField = (field = "note") =>
-  body(field)
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: POLICY.NOTE_MAX })
-    .withMessage("Note is too long");
+const noteField = (field = "note", label = "Note") => noteBody(field, POLICY.NOTE_MAX, label);
 
 const dateField = (field, label, { optional = false } = {}) => {
   const chain = optional ? body(field).optional() : body(field);
 
-  return chain
-    .isISO8601()
-    .withMessage(`${label} must be a valid date`)
-    .toDate();
+  return chain.isISO8601().withMessage(`${label} must be a valid date`).toDate();
 };
+
+/** The same date rule for a query string, used by the availability search. */
+const dateQuery = (field, label) =>
+  query(field).isISO8601().withMessage(`${label} must be a valid date`).toDate();
 
 const guestsField = ({ optional = false } = {}) => {
   const chain = optional ? body("guests").optional() : body("guests");
@@ -61,76 +62,64 @@ const servicesField = () =>
     )
     .withMessage("Each service needs a name, a price of zero or more and a quantity of at least 1");
 
+/** Fields the server derives itself and must never accept from a client. */
+const SERVER_OWNED_FIELDS = ["status", "pricing", "payment", "reference", "history"];
+
 export const availabilityValidation = [
-  query("checkIn").isISO8601().withMessage("Check-in must be a valid date").toDate(),
-  query("checkOut").isISO8601().withMessage("Check-out must be a valid date").toDate(),
-  query("roomType").optional().isMongoId().withMessage("Invalid room type"),
-  query("guests")
-    .optional()
-    .isInt({ min: 1, max: POLICY.MAX_GUESTS })
-    .withMessage("Guests must be a whole number")
-    .toInt(),
-  query("floor").optional().isInt({ min: -5, max: 200 }).withMessage("Floor is out of range").toInt(),
+  dateQuery("checkIn", "Check-in"),
+  dateQuery("checkOut", "Check-out"),
+  mongoIdQuery("roomType", "Invalid room type"),
+  intQuery("guests", { min: 1, max: POLICY.MAX_GUESTS, message: "Guests must be a whole number" }),
+  intQuery("floor", { min: -5, max: 200, message: "Floor is out of range" }),
 ];
 
 export const occupancyValidation = [
-  query("checkIn").isISO8601().withMessage("Start date must be valid").toDate(),
-  query("checkOut").isISO8601().withMessage("End date must be valid").toDate(),
+  dateQuery("checkIn", "Start date"),
+  dateQuery("checkOut", "End date"),
 ];
 
 export const listReservationsValidation = [
-  query("page").optional().isInt({ min: 1 }).withMessage("page must be a positive integer").toInt(),
-  query("limit")
-    .optional()
-    .isInt({ min: 1, max: 100 })
-    .withMessage("limit must be between 1 and 100")
-    .toInt(),
-  query("search").optional().trim().isLength({ max: 80 }).withMessage("Search term is too long"),
+  ...paginationRules(),
+  searchRule(80),
   query("status").optional().isIn(RESERVATION_STATUS_VALUES).withMessage("Unknown status"),
-  query("customer").optional().isMongoId().withMessage("Invalid customer filter"),
-  query("room").optional().isMongoId().withMessage("Invalid room filter"),
-  query("roomType").optional().isMongoId().withMessage("Invalid room type filter"),
+  mongoIdQuery("customer", "Invalid customer filter"),
+  mongoIdQuery("room", "Invalid room filter"),
+  mongoIdQuery("roomType", "Invalid room type filter"),
   query("from").optional().isISO8601().withMessage("from must be a valid date").toDate(),
   query("to").optional().isISO8601().withMessage("to must be a valid date").toDate(),
   query("unpaid").optional().isBoolean().withMessage("unpaid must be true or false").toBoolean(),
-  query("sort").optional().isIn(RESERVATION_SORT_OPTIONS).withMessage("Unsupported sort option"),
+  sortRule(RESERVATION_SORT_OPTIONS),
 ];
 
 export const createReservationValidation = [
-  body("room").isMongoId().withMessage("A room must be selected"),
+  mongoIdBody("room", "A room must be selected"),
   // Only staff may set this; the service refuses it for anyone else.
-  body("customer").optional().isMongoId().withMessage("Invalid customer"),
+  mongoIdBody("customer", "Invalid customer", { optional: true }),
   dateField("checkIn", "Check-in"),
   dateField("checkOut", "Check-out"),
   guestsField(),
   servicesField(),
-  noteField("specialRequests"),
-  // Status, pricing and payment are derived server-side, never accepted.
-  body(["status", "pricing", "payment", "reference", "history"]).customSanitizer(() => undefined),
+  noteField("specialRequests", "Special requests"),
+  stripFields(SERVER_OWNED_FIELDS),
 ];
 
 export const updateReservationValidation = [
   ...reservationIdValidation,
-  body("room").optional().isMongoId().withMessage("Invalid room"),
+  mongoIdBody("room", "Invalid room", { optional: true }),
   dateField("checkIn", "Check-in", { optional: true }),
   dateField("checkOut", "Check-out", { optional: true }),
   guestsField({ optional: true }),
   servicesField(),
-  noteField("specialRequests"),
-  body(["status", "pricing", "payment", "reference", "history", "customer"]).customSanitizer(
-    () => undefined
-  ),
+  noteField("specialRequests", "Special requests"),
+  // The customer is fixed once the booking exists, on top of the derived fields.
+  stripFields([...SERVER_OWNED_FIELDS, "customer"]),
 ];
 
 export const transitionValidation = [...reservationIdValidation, noteField()];
 
 export const cancelReservationValidation = [
   ...reservationIdValidation,
-  body("reason")
-    .optional({ values: "null" })
-    .trim()
-    .isLength({ max: POLICY.NOTE_MAX })
-    .withMessage("Reason is too long"),
+  noteField("reason", "Reason"),
 ];
 
 export const recordPaymentValidation = [

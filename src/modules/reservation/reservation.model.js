@@ -1,4 +1,6 @@
 import mongoose from "mongoose";
+import { toDateString } from "../../shared/utils/date.util.js";
+import { money } from "../../shared/utils/money.util.js";
 import {
   BLOCKING_STATUSES,
   POLICY,
@@ -6,9 +8,6 @@ import {
   RESERVATION_STATUS_VALUES,
   nightsBetween,
 } from "./reservation.constants.js";
-
-/** Rounds money to two decimals; floats accumulate error over a long stay. */
-const money = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 
 const serviceSchema = new mongoose.Schema(
   {
@@ -309,7 +308,7 @@ reservationSchema.methods.toHistoryObject = function toHistoryObject() {
  * the unique index catches one if it ever happens.
  */
 export const generateReference = (date = new Date()) => {
-  const stamp = date.toISOString().slice(0, 10).replace(/-/g, "");
+  const stamp = toDateString(date).replace(/-/g, "");
   const random = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `RSV-${stamp}-${random}`;
 };

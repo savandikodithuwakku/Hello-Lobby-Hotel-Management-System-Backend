@@ -1,4 +1,9 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { toId } from "../../shared/utils/id.util.js";
+import { money } from "../../shared/utils/money.util.js";
+import { paginateQuery } from "../../shared/utils/pagination.util.js";
+import { containsInsensitive, humanise } from "../../shared/utils/text.util.js";
+import { toDateString } from "../../shared/utils/date.util.js";
 import { PERMISSIONS } from "../auth/rbac/permissions.js";
 import User from "../user/user.model.js";
 import Room from "../room/room.model.js";
@@ -12,10 +17,8 @@ import {
 } from "./availability.service.js";
 import {
   CANCELLABLE_STATUSES,
-  DEFAULT_PAGE_SIZE,
   DEFAULT_RESERVATION_SORT,
   EDITABLE_STATUSES,
-  MAX_PAGE_SIZE,
   POLICY,
   RESERVATION_STATUSES,
   addDays,
@@ -23,10 +26,6 @@ import {
   getAllowedTransitions,
   today,
 } from "./reservation.constants.js";
-
-const money = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
-
-const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Populates everything `toSafeObject` needs to render a full reservation. */
 const withRelations = (query) =>
@@ -48,7 +47,7 @@ const canReadAll = (viewer) => Boolean(viewer?.hasPermission(PERMISSIONS.RESERVA
 const assertCanView = (viewer, reservation) => {
   if (canReadAll(viewer)) return;
 
-  const ownerId = reservation.customer?._id ?? reservation.customer;
+  const ownerId = toId(reservation.customer);
 
   if (!ownerId || !viewer._id.equals(ownerId)) {
     // 404 rather than 403: a guest should not be able to probe which references exist.
@@ -78,7 +77,7 @@ const findReservationOrFail = async (id) => {
 const holdRoomIfCurrent = async (reservation, actorId) => {
   if (!reservation.isCurrent()) return;
 
-  const room = await Room.findById(reservation.room?._id ?? reservation.room);
+  const room = await Room.findById(toId(reservation.room));
 
   if (room?.status === ROOM_STATUSES.AVAILABLE) {
     await reserveRoom(room._id, { actorId, note: `Booking ${reservation.reference}` });
@@ -91,7 +90,7 @@ const holdRoomIfCurrent = async (reservation, actorId) => {
  * available from reserved, or to cleaning after an occupied stay.
  */
 const releaseRoomIfHeld = async (reservation, actorId, note) => {
-  const room = await Room.findById(reservation.room?._id ?? reservation.room);
+  const room = await Room.findById(toId(reservation.room));
 
   if (!room) return;
 
@@ -209,8 +208,8 @@ export const createReservation = async (actor, payload) => {
 
 export const listReservations = async (query, viewer) => {
   const {
-    page = 1,
-    limit = DEFAULT_PAGE_SIZE,
+    page,
+    limit,
     search,
     status,
     customer,
@@ -254,7 +253,7 @@ export const listReservations = async (query, viewer) => {
   }
 
   if (search) {
-    const pattern = new RegExp(escapeRegex(search), "i");
+    const pattern = containsInsensitive(search);
     // Reference is the common case; a name or email search resolves to ids first.
     const customerIds = await User.find({ $or: [{ name: pattern }, { email: pattern }] }).distinct(
       "_id"
@@ -267,27 +266,16 @@ export const listReservations = async (query, viewer) => {
     filter.$and = [...(filter.$and || []), { $or: or }];
   }
 
-  const safeLimit = Math.min(Number(limit) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-  const safePage = Math.max(Number(page) || 1, 1);
-
-  const [reservations, total] = await Promise.all([
-    withRelations(
-      Reservation.find(filter)
-        .sort(sort)
-        .skip((safePage - 1) * safeLimit)
-        .limit(safeLimit)
-    ),
-    Reservation.countDocuments(filter),
-  ]);
+  const { documents, pagination } = await paginateQuery(Reservation, filter, {
+    page,
+    limit,
+    sort,
+    decorate: withRelations,
+  });
 
   return {
-    reservations: reservations.map((reservation) => reservation.toSafeObject()),
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total,
-      totalPages: Math.ceil(total / safeLimit) || 1,
-    },
+    reservations: documents.map((reservation) => reservation.toSafeObject()),
+    pagination,
   };
 };
 
@@ -386,14 +374,14 @@ export const updateReservation = async (actor, id, payload) => {
   if (!EDITABLE_STATUSES.includes(reservation.status)) {
     throw new ApiError(
       409,
-      `A ${reservation.status.replace("_", " ")} reservation can no longer be edited`
+      `A ${humanise(reservation.status)} reservation can no longer be edited`
     );
   }
 
   const datesChanged = payload.checkIn !== undefined || payload.checkOut !== undefined;
   const roomChanged =
     payload.room !== undefined &&
-    String(payload.room) !== String(reservation.room?._id ?? reservation.room);
+    String(payload.room) !== String(toId(reservation.room));
   const guests = payload.guests ?? reservation.guests;
 
   if (datesChanged || roomChanged || payload.guests !== undefined) {
@@ -404,7 +392,7 @@ export const updateReservation = async (actor, id, payload) => {
 
     // The booking's own dates must not count as a clash with itself.
     const room = await assertRoomIsAvailable({
-      room: payload.room ?? reservation.room?._id ?? reservation.room,
+      room: payload.room ?? toId(reservation.room),
       checkIn: stay.checkIn,
       checkOut: stay.checkOut,
       guests,
@@ -459,8 +447,8 @@ const assertTransition = (reservation, next) => {
     throw new ApiError(
       409,
       allowed.length === 0
-        ? `This reservation is ${reservation.status.replace("_", " ")} and cannot change further`
-        : `A ${reservation.status.replace("_", " ")} reservation can only move to: ${allowed.join(", ")}`
+        ? `This reservation is ${humanise(reservation.status)} and cannot change further`
+        : `A ${humanise(reservation.status)} reservation can only move to: ${allowed.join(", ")}`
     );
   }
 };
@@ -496,7 +484,7 @@ export const cancelReservation = async (actor, id, { reason } = {}) => {
   assertCanView(actor, reservation);
 
   // A guest may call off their own booking; anyone else needs the permission.
-  const isOwner = actor._id.equals(reservation.customer?._id ?? reservation.customer);
+  const isOwner = actor._id.equals(toId(reservation.customer));
   if (!isOwner && !actor.hasPermission(PERMISSIONS.RESERVATION_CANCEL)) {
     throw new ApiError(403, "You do not have permission to cancel this reservation");
   }
@@ -504,7 +492,7 @@ export const cancelReservation = async (actor, id, { reason } = {}) => {
   if (!CANCELLABLE_STATUSES.includes(reservation.status)) {
     throw new ApiError(
       409,
-      `A ${reservation.status.replace("_", " ")} reservation cannot be cancelled`
+      `A ${humanise(reservation.status)} reservation cannot be cancelled`
     );
   }
 
@@ -546,11 +534,11 @@ export const checkInReservation = async (actor, id, { note } = {}) => {
   if (reservation.checkIn > today()) {
     throw new ApiError(
       409,
-      `This reservation starts on ${reservation.checkIn.toISOString().slice(0, 10)}`
+      `This reservation starts on ${toDateString(reservation.checkIn)}`
     );
   }
 
-  const room = await Room.findById(reservation.room?._id ?? reservation.room);
+  const room = await Room.findById(toId(reservation.room));
 
   if (!room) {
     throw new ApiError(404, "The room for this reservation no longer exists");
@@ -584,7 +572,7 @@ export const checkOutReservation = async (actor, id, { note } = {}) => {
   await reservation.save();
 
   // Sends the room to housekeeping; it returns to availability once cleaned.
-  await releaseRoom(reservation.room?._id ?? reservation.room, {
+  await releaseRoom(toId(reservation.room), {
     actorId: actor._id,
     note: `Departure ${reservation.reference}`,
   });

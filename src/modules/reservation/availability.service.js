@@ -1,4 +1,5 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { toDateString } from "../../shared/utils/date.util.js";
 import Room from "../room/room.model.js";
 import RoomType from "../room/roomType.model.js";
 import Reservation from "./reservation.model.js";
@@ -111,22 +112,53 @@ export const findAvailableRooms = async ({
   const roomFilter = nonBookableRoomFilter();
   if (floor !== undefined) roomFilter.floor = floor;
 
+  // The types on sale for this search, before party size is considered. Kept
+  // separate so an empty result can say whether the party was too large or the
+  // dates were simply taken.
+  const scopedTypes = (await RoomType.find({ isActive: true }).select("name maxOccupancy")).filter(
+    (type) => !roomType || type._id.equals(roomType)
+  );
+
   // A party of four cannot be sold a room that sleeps two.
-  const typeFilter = { isActive: true };
-  if (guests !== undefined) typeFilter.maxOccupancy = { $gte: guests };
+  const fittingTypes =
+    guests === undefined
+      ? scopedTypes
+      : scopedTypes.filter((type) => type.maxOccupancy >= guests);
 
-  const sellableTypeIds = await RoomType.find(typeFilter).distinct("_id");
+  /** The biggest party any room on sale for this search could take. */
+  const largestOccupancy = scopedTypes.reduce(
+    (largest, type) => Math.max(largest, type.maxOccupancy),
+    0
+  );
 
-  roomFilter.roomType = roomType
-    ? { $in: sellableTypeIds.filter((id) => id.equals(roomType)) }
-    : { $in: sellableTypeIds };
+  const empty = (reason) => ({
+    checkIn: stay.checkIn,
+    checkOut: stay.checkOut,
+    nights: stay.nights,
+    rooms: [],
+    total: 0,
+    unavailable: 0,
+    reason,
+    largestOccupancy,
+    requestedGuests: guests ?? null,
+  });
+
+  if (scopedTypes.length === 0) {
+    return empty("no-room-types");
+  }
+
+  if (fittingTypes.length === 0) {
+    return empty("over-capacity");
+  }
+
+  roomFilter.roomType = { $in: fittingTypes.map((type) => type._id) };
 
   const candidates = await Room.find(roomFilter)
     .populate("roomType", "name basePrice maxOccupancy facilities isActive")
     .sort("roomNumber");
 
   if (candidates.length === 0) {
-    return { ...stay, rooms: [], total: 0 };
+    return empty("no-rooms");
   }
 
   const conflicts = await findConflicts({
@@ -158,6 +190,10 @@ export const findAvailableRooms = async ({
     total: rooms.length,
     /** How many were ruled out by an existing booking, for the empty state. */
     unavailable: candidates.length - rooms.length,
+    /** Why nothing came back, so the empty state can say something useful. */
+    reason: rooms.length === 0 ? "fully-booked" : null,
+    largestOccupancy,
+    requestedGuests: guests ?? null,
   };
 };
 
@@ -214,7 +250,7 @@ export const assertRoomIsAvailable = async ({
     throw new ApiError(
       409,
       `Room ${roomDoc.roomNumber} is already booked for those dates (${clash.reference}, ` +
-        `${clash.checkIn.toISOString().slice(0, 10)} to ${clash.checkOut.toISOString().slice(0, 10)})`
+        `${toDateString(clash.checkIn)} to ${toDateString(clash.checkOut)})`
     );
   }
 

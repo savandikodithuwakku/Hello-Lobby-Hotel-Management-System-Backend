@@ -1,4 +1,6 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { paginateQuery } from "../../shared/utils/pagination.util.js";
+import { containsInsensitive } from "../../shared/utils/text.util.js";
 import env from "../../config/env.js";
 import { sendEmailSafely } from "../../shared/mail/mailer.js";
 import { getFrontendBaseUrl } from "../../config/app.config.js";
@@ -10,10 +12,8 @@ import { PASSWORD_RESET_TOKEN_EXPIRES_MINUTES } from "../auth/auth.constants.js"
 import User from "./user.model.js";
 import {
   ADDRESS_FIELDS,
-  DEFAULT_PAGE_SIZE,
   DEFAULT_USER_SORT,
   LOGIN_BLOCKING_STATUSES,
-  MAX_PAGE_SIZE,
   USER_ROLES,
   USER_STATUSES,
 } from "./user.constants.js";
@@ -73,8 +73,8 @@ const findUserOrFail = async (userId) => {
 };
 
 export const listUsers = async ({
-  page = 1,
-  limit = DEFAULT_PAGE_SIZE,
+  page,
+  limit,
   role,
   status,
   search,
@@ -86,31 +86,13 @@ export const listUsers = async ({
   if (status) filter.status = status;
   if (search) {
     // Escaped so a user-supplied string can never act as a regular expression.
-    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const pattern = new RegExp(escaped, "i");
+    const pattern = containsInsensitive(search);
     filter.$or = [{ name: pattern }, { email: pattern }, { phone: pattern }];
   }
 
-  const safeLimit = Math.min(Number(limit) || DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
-  const safePage = Math.max(Number(page) || 1, 1);
+  const { documents, pagination } = await paginateQuery(User, filter, { page, limit, sort });
 
-  const [users, total] = await Promise.all([
-    User.find(filter)
-      .sort(sort)
-      .skip((safePage - 1) * safeLimit)
-      .limit(safeLimit),
-    User.countDocuments(filter),
-  ]);
-
-  return {
-    users: users.map((user) => user.toSafeObject()),
-    pagination: {
-      page: safePage,
-      limit: safeLimit,
-      total,
-      totalPages: Math.ceil(total / safeLimit) || 1,
-    },
-  };
+  return { users: documents.map((user) => user.toSafeObject()), pagination };
 };
 
 export const getUserById = async (userId) => {

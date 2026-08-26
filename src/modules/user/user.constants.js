@@ -48,5 +48,6 @@ export const USER_SORT_OPTIONS = Object.freeze([
 ]);
 
 export const DEFAULT_USER_SORT = "-createdAt";
-export const DEFAULT_PAGE_SIZE = 20;
-export const MAX_PAGE_SIZE = 100;
+/** Paging limits are the same everywhere; re-exported so this module's
+ * imports stay in one place. */
+export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from "../../shared/constants/pagination.constants.js";
