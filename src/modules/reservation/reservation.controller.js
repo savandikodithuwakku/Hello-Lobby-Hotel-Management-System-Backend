@@ -79,15 +79,10 @@ export const cancelReservation = transitionHandler(
   RESERVATION_MESSAGES.CANCELLED
 );
 
-export const checkIn = transitionHandler(
-  reservationService.checkInReservation,
-  RESERVATION_MESSAGES.CHECKED_IN
-);
-
-export const checkOut = transitionHandler(
-  reservationService.checkOutReservation,
-  RESERVATION_MESSAGES.CHECKED_OUT
-);
+/**
+ * Arrivals and departures are handled by the front-desk module, which checks
+ * the bill and the room as well as the booking before letting either happen.
+ */
 
 export const completeReservation = transitionHandler(
   reservationService.completeReservation,

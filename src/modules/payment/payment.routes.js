@@ -11,8 +11,10 @@ import {
   getInvoiceValidation,
   listInvoicesValidation,
   listTransactionsValidation,
+  postChargeValidation,
   recordPaymentValidation,
   refundValidation,
+  reverseChargeValidation,
   startCheckoutValidation,
   transactionIdValidation,
 } from "./payment.validation.js";
@@ -110,6 +112,38 @@ router.post(
   paymentController.startCheckout
 );
 
+/**
+ * The folio - what the guest used while they were here.
+ *
+ * Posted to the bill rather than back onto the booking, so a minibar does not
+ * require unfreezing a booking's dates, and so the money side of a stay stays
+ * in one place. Only open while the guest is actually in the building.
+ */
+router.get(
+  "/invoices/:id/charges",
+  requirePermission(PERMISSIONS.PAYMENT_READ, PERMISSIONS.PAYMENT_READ_OWN),
+  getInvoiceValidation("id"),
+  validateRequest,
+  paymentController.listCharges
+);
+
+router.post(
+  "/invoices/:id/charges",
+  requirePermission(PERMISSIONS.PAYMENT_CREATE),
+  postChargeValidation("id"),
+  validateRequest,
+  paymentController.postCharge
+);
+
+/** A posted line is never deleted - it is cancelled out by an opposite one. */
+router.post(
+  "/invoices/:id/charges/:chargeId/reverse",
+  requirePermission(PERMISSIONS.PAYMENT_CREATE),
+  reverseChargeValidation("id"),
+  validateRequest,
+  paymentController.reverseCharge
+);
+
 router.get(
   "/invoices/:id/refund-quote",
   requirePermission(PERMISSIONS.PAYMENT_REFUND, PERMISSIONS.PAYMENT_READ),
@@ -155,6 +189,30 @@ router.post(
   startCheckoutValidation("reservationId"),
   validateRequest,
   paymentController.startCheckout
+);
+
+router.get(
+  "/reservations/:reservationId/charges",
+  requirePermission(PERMISSIONS.PAYMENT_READ, PERMISSIONS.PAYMENT_READ_OWN),
+  getInvoiceValidation("reservationId"),
+  validateRequest,
+  paymentController.listCharges
+);
+
+router.post(
+  "/reservations/:reservationId/charges",
+  requirePermission(PERMISSIONS.PAYMENT_CREATE),
+  postChargeValidation("reservationId"),
+  validateRequest,
+  paymentController.postCharge
+);
+
+router.post(
+  "/reservations/:reservationId/charges/:chargeId/reverse",
+  requirePermission(PERMISSIONS.PAYMENT_CREATE),
+  reverseChargeValidation("reservationId"),
+  validateRequest,
+  paymentController.reverseCharge
 );
 
 router.get(

@@ -13,9 +13,10 @@ import {
   stripFields,
 } from "../../shared/validators/common.validators.js";
 import {
+  HOUSEKEEPING_STATUS_VALUES,
   LIMITS,
+  OCCUPANCY_STATUS_VALUES,
   ROOM_SORT_OPTIONS,
-  ROOM_STATUS_VALUES,
   ROOM_TYPE_SORT_OPTIONS,
 } from "./room.constants.js";
 
@@ -72,12 +73,12 @@ const imagesField = () =>
     )
     .withMessage("Each image needs a valid URL and an optional short description");
 
-const roomStatusBody = ({ optional = false } = {}) => {
-  const chain = optional ? body("status").optional() : body("status");
-  return chain.isIn(ROOM_STATUS_VALUES).withMessage("Unknown room status");
+const housekeepingBody = ({ optional = false } = {}) => {
+  const chain = optional ? body("housekeeping").optional() : body("housekeeping");
+  return chain.isIn(HOUSEKEEPING_STATUS_VALUES).withMessage("Unknown housekeeping status");
 };
 
-const statusNoteBody = (field = "note", label = "Note") => noteBody(field, LIMITS.NOTE_MAX, label);
+const noteField = (field = "note", label = "Note") => noteBody(field, LIMITS.NOTE_MAX, label);
 
 export const roomTypeIdValidation = mongoIdParam("id", "room type");
 export const roomIdValidation = mongoIdParam("id", "room");
@@ -151,7 +152,13 @@ export const listRoomsValidation = [
   // Room numbers are short, so a long search term is certainly a mistake.
   searchRule(20),
   mongoIdQuery("roomType", "Invalid room type filter"),
-  query("status").optional().isIn(ROOM_STATUS_VALUES).withMessage("Unknown room status"),
+  query("occupancy").optional().isIn(OCCUPANCY_STATUS_VALUES).withMessage("Unknown occupancy"),
+  query("housekeeping")
+    .optional()
+    .isIn(HOUSEKEEPING_STATUS_VALUES)
+    .withMessage("Unknown housekeeping status"),
+  // "Empty but not fit to sell" - the rooms losing the hotel money quietly.
+  booleanQuery("discrepant"),
   floorQuery(),
   booleanQuery("isActive"),
   ...priceRangeQueries(),
@@ -199,8 +206,8 @@ export const createRoomValidation = [
   floorBody(),
   priceOverrideField(),
   facilitiesField(),
-  roomStatusBody({ optional: true }),
-  statusNoteBody("statusNote", "Status note"),
+  housekeepingBody({ optional: true }),
+  noteField("housekeepingNote", "Housekeeping note"),
 ];
 
 export const updateRoomValidation = [
@@ -210,14 +217,15 @@ export const updateRoomValidation = [
   floorBody({ optional: true }),
   priceOverrideField(),
   facilitiesField(),
-  // Status and activation are state transitions with their own rules.
-  stripFields("status", "isActive"),
+  // Both statuses and activation are transitions with their own rules, so a
+  // stray field in an edit form is dropped rather than written to the room.
+  stripFields("occupancy", "housekeeping", "isActive"),
 ];
 
-export const changeRoomStatusValidation = [
+export const changeHousekeepingValidation = [
   ...roomIdValidation,
-  roomStatusBody(),
-  statusNoteBody(),
+  housekeepingBody(),
+  noteField(),
 ];
 
-export const deactivateRoomValidation = [...roomIdValidation, statusNoteBody()];
+export const deactivateRoomValidation = [...roomIdValidation, noteField()];

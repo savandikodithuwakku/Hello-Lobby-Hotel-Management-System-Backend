@@ -93,9 +93,6 @@ export const POLICY = Object.freeze({
   MAX_AMOUNT: 100_000_000,
 });
 
-/** Rooms in these statuses cannot take a booking at all, on any date. */
-export const NON_BOOKABLE_ROOM_STATUSES = Object.freeze(["maintenance", "out_of_service"]);
-
 /* -------------------------------------------------------------------------- */
 /* Dates                                                                      */
 /* -------------------------------------------------------------------------- */

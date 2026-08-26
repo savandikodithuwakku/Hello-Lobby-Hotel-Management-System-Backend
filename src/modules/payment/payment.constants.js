@@ -121,6 +121,38 @@ export const METHOD_LABELS = Object.freeze({
 });
 
 /* -------------------------------------------------------------------------- */
+/* The folio - what the guest used while they were here                       */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * What kind of thing was charged to the room.
+ *
+ * Coarse on purpose. These are the groupings a hotel actually reports revenue
+ * by; anything finer belongs in the description, where it can be read.
+ */
+export const CHARGE_CATEGORIES = Object.freeze({
+  FOOD_AND_DRINK: "food_and_drink",
+  MINIBAR: "minibar",
+  LAUNDRY: "laundry",
+  SPA: "spa",
+  TRANSPORT: "transport",
+  TELEPHONE: "telephone",
+  DAMAGE: "damage",
+  /** Late checkout, an extra bed, an early arrival. */
+  ROOM_CHARGE: "room_charge",
+  OTHER: "other",
+  /** Cancels an earlier line out. Never posted directly - see `reverses`. */
+  ADJUSTMENT: "adjustment",
+});
+
+export const CHARGE_CATEGORY_VALUES = Object.freeze(Object.values(CHARGE_CATEGORIES));
+
+/** The categories a person may choose. Adjustments are made, not chosen. */
+export const POSTABLE_CHARGE_CATEGORIES = Object.freeze(
+  CHARGE_CATEGORY_VALUES.filter((category) => category !== CHARGE_CATEGORIES.ADJUSTMENT)
+);
+
+/* -------------------------------------------------------------------------- */
 /* Policy                                                                     */
 /* -------------------------------------------------------------------------- */
 
@@ -159,6 +191,11 @@ export const POLICY = Object.freeze({
 
   /** A bank slip number, a card terminal receipt number and so on. */
   EXTERNAL_REFERENCE_MAX: 120,
+
+  /** "Minibar - 2 x still water". Long enough to be useful on a printed bill. */
+  CHARGE_DESCRIPTION_MAX: 160,
+  /** How many lines one folio may carry, so a stay cannot grow without bound. */
+  MAX_CHARGES: 200,
 });
 
 /* -------------------------------------------------------------------------- */

@@ -7,14 +7,15 @@ import { containsInsensitive } from "../../shared/utils/text.util.js";
 import Room from "./room.model.js";
 import RoomType from "./roomType.model.js";
 import {
-  BOOKABLE_STATUSES,
   DEFAULT_ROOM_SORT,
-  RELEASE_STATUS,
-  RESERVATION_CONTROLLED_STATUSES,
-  ROOM_STATUSES,
-  ROOM_STATUS_VALUES,
-  canTransitionManually,
-  getAllowedTransitions,
+  HOUSEKEEPING_STATUSES,
+  HOUSEKEEPING_STATUS_VALUES,
+  OCCUPANCY_STATUSES,
+  OCCUPANCY_STATUS_VALUES,
+  RELEASE_STATE,
+  SELLABLE_HOUSEKEEPING,
+  canChangeHousekeeping,
+  getAllowedHousekeepingTransitions,
 } from "./room.constants.js";
 
 /** Every read populates the type: price and facilities fall back to it. */
@@ -46,13 +47,23 @@ const assertTypeIsUsable = async (roomTypeId) => {
 };
 
 /**
- * Applies a status change and its audit fields in one place, so every path
- * (manual, reservation-driven or reactivation) records who changed what.
+ * Applies a housekeeping change and its audit fields in one place, so every
+ * path - a housekeeper on the board, a departure, a room coming back into the
+ * inventory - records who changed it and why.
  */
-const applyStatus = (room, status, { note, actorId = null } = {}) => {
-  room.status = status;
-  room.statusChangedBy = actorId;
-  if (note !== undefined) room.statusNote = note || "";
+const applyHousekeeping = (room, housekeeping, { note, actorId = null } = {}) => {
+  room.housekeeping = housekeeping;
+  room.housekeepingChangedBy = actorId;
+  if (note !== undefined) room.housekeepingNote = note || "";
+};
+
+/**
+ * Applies an occupancy change. Separate from the above because the two move for
+ * entirely different reasons: this one only ever happens because something
+ * happened to a booking.
+ */
+const applyOccupancy = (room, occupancy) => {
+  room.occupancy = occupancy;
 };
 
 /* -------------------------------------------------------------------------- */
@@ -64,7 +75,9 @@ export const listRooms = async ({
   limit,
   search,
   roomType,
-  status,
+  occupancy,
+  housekeeping,
+  discrepant,
   floor,
   isActive,
   minPrice,
@@ -74,8 +87,17 @@ export const listRooms = async ({
   const filter = {};
 
   if (isActive !== undefined) filter.isActive = isActive;
-  if (status) filter.status = status;
+  if (occupancy) filter.occupancy = occupancy;
+  if (housekeeping) filter.housekeeping = housekeeping;
   if (roomType) filter.roomType = roomType;
+
+  // "Empty but not fit to sell" - the rooms quietly costing the hotel money.
+  // Expressible only because occupancy and housekeeping are separate fields.
+  if (discrepant === true) {
+    filter.isActive = true;
+    filter.occupancy = OCCUPANCY_STATUSES.VACANT;
+    filter.housekeeping = { $nin: SELLABLE_HOUSEKEEPING };
+  }
   if (floor !== undefined) filter.floor = floor;
   if (search) filter.roomNumber = containsInsensitive(search);
 
@@ -109,16 +131,21 @@ export const listRooms = async ({
  * depends on bookings and belongs to the reservation module, which will filter
  * this set further by checking its own documents.
  */
-export const listAvailableRooms = async ({ roomType, floor, occupancy }) => {
-  const filter = { isActive: true, status: { $in: BOOKABLE_STATUSES } };
+export const listAvailableRooms = async ({ roomType, floor, occupancy: partySize }) => {
+  // Both statuses have to agree before a room can be walked into.
+  const filter = {
+    isActive: true,
+    occupancy: OCCUPANCY_STATUSES.VACANT,
+    housekeeping: { $in: SELLABLE_HOUSEKEEPING },
+  };
 
   if (roomType) filter.roomType = roomType;
   if (floor !== undefined) filter.floor = floor;
 
-  if (occupancy !== undefined) {
+  if (partySize !== undefined) {
     // Only types that seat the requested party size.
     const typeIds = await RoomType.find({
-      maxOccupancy: { $gte: occupancy },
+      maxOccupancy: { $gte: partySize },
       isActive: true,
     }).distinct("_id");
 
@@ -132,10 +159,14 @@ export const listAvailableRooms = async ({ roomType, floor, occupancy }) => {
 
 /** Inventory summary for dashboards and the front desk board. */
 export const getRoomStatistics = async () => {
-  const [byStatus, byType, totals] = await Promise.all([
+  const [byOccupancy, byHousekeeping, byType, totals, discrepant] = await Promise.all([
     Room.aggregate([
       { $match: { isActive: true } },
-      { $group: { _id: "$status", count: { $sum: 1 } } },
+      { $group: { _id: "$occupancy", count: { $sum: 1 } } },
+    ]),
+    Room.aggregate([
+      { $match: { isActive: true } },
+      { $group: { _id: "$housekeeping", count: { $sum: 1 } } },
     ]),
     Room.aggregate([
       { $match: { isActive: true } },
@@ -148,23 +179,49 @@ export const getRoomStatistics = async () => {
       { $sort: { name: 1 } },
     ]),
     Room.countDocuments({}),
+    Room.countDocuments({
+      isActive: true,
+      occupancy: OCCUPANCY_STATUSES.VACANT,
+      housekeeping: { $nin: SELLABLE_HOUSEKEEPING },
+    }),
   ]);
 
-  // Report every status, including the ones with no rooms in them.
-  const statusCounts = Object.fromEntries(ROOM_STATUS_VALUES.map((status) => [status, 0]));
-  byStatus.forEach((row) => {
-    statusCounts[row._id] = row.count;
-  });
+  // Report every status, including the ones with no rooms in them, so a board
+  // shows a zero rather than the row disappearing.
+  const tally = (rows, values) => {
+    const counts = Object.fromEntries(values.map((value) => [value, 0]));
+    rows.forEach((row) => {
+      counts[row._id] = row.count;
+    });
+    return counts;
+  };
 
-  const active = byStatus.reduce((sum, row) => sum + row.count, 0);
+  const occupancyCounts = tally(byOccupancy, OCCUPANCY_STATUS_VALUES);
+  const housekeepingCounts = tally(byHousekeeping, HOUSEKEEPING_STATUS_VALUES);
+
+  const active = byOccupancy.reduce((sum, row) => sum + row.count, 0);
+
+  // Sellable needs both: nobody in the room, and fit for a guest. Counting
+  // vacant rooms alone would promise rooms that have not been cleaned.
+  const sellable = await Room.countDocuments({
+    isActive: true,
+    occupancy: OCCUPANCY_STATUSES.VACANT,
+    housekeeping: { $in: SELLABLE_HOUSEKEEPING },
+  });
 
   return {
     total: totals,
     active,
     inactive: totals - active,
-    available: statusCounts[ROOM_STATUSES.AVAILABLE],
-    occupancyRate: active === 0 ? 0 : Math.round((statusCounts[ROOM_STATUSES.OCCUPIED] / active) * 100),
-    byStatus: statusCounts,
+    sellable,
+    /** Empty rooms that cannot be sold because nobody has serviced them. */
+    discrepant,
+    occupancyRate:
+      active === 0
+        ? 0
+        : Math.round((occupancyCounts[OCCUPANCY_STATUSES.OCCUPIED] / active) * 100),
+    byOccupancy: occupancyCounts,
+    byHousekeeping: housekeepingCounts,
     byRoomType: byType,
   };
 };
@@ -173,7 +230,7 @@ export const getRoomById = async (id) => {
   const room = await findRoomOrFail(id);
   return {
     ...room.toSafeObject(),
-    allowedTransitions: getAllowedTransitions(room.status),
+    allowedHousekeepingTransitions: getAllowedHousekeepingTransitions(room.housekeeping),
   };
 };
 
@@ -201,7 +258,7 @@ const auditSnapshot = (room) => ({
   facilities: [...room.facilities],
 });
 
-export const createRoom = async (actor, { roomNumber, roomType, floor, price, facilities, status, statusNote }) => {
+export const createRoom = async (actor, { roomNumber, roomType, floor, price, facilities, housekeeping, housekeepingNote }) => {
   const normalisedNumber = roomNumber.trim().toUpperCase();
 
   const existing = await Room.findOne({ roomNumber: normalisedNumber });
@@ -219,9 +276,8 @@ export const createRoom = async (actor, { roomNumber, roomType, floor, price, fa
 
   await assertTypeIsUsable(roomType);
 
-  if (status && RESERVATION_CONTROLLED_STATUSES.includes(status)) {
-    throw new ApiError(400, "A new room cannot start out reserved or occupied");
-  }
+  // Occupancy is not accepted at all: a room becomes reserved or occupied only
+  // because a booking says so, never because somebody typed it into a form.
 
   const room = new Room({
     roomNumber: normalisedNumber,
@@ -229,9 +285,12 @@ export const createRoom = async (actor, { roomNumber, roomType, floor, price, fa
     floor,
     price: price ?? null,
     facilities: facilities || [],
-    status: status || ROOM_STATUSES.AVAILABLE,
-    statusNote: statusNote || "",
-    statusChangedBy: actor._id,
+    occupancy: OCCUPANCY_STATUSES.VACANT,
+    // A brand new room has not been serviced, so it starts dirty rather than
+    // being offered to a guest before anyone has looked at it.
+    housekeeping: housekeeping || HOUSEKEEPING_STATUSES.DIRTY,
+    housekeepingNote: housekeepingNote || "",
+    housekeepingChangedBy: actor._id,
     createdBy: actor._id,
     updatedBy: actor._id,
   });
@@ -249,8 +308,9 @@ export const createRoom = async (actor, { roomNumber, roomType, floor, price, fa
 };
 
 /**
- * Edits the room's identity and pricing. Status is deliberately not accepted
- * here - it moves through `changeRoomStatus`, which enforces the state machine.
+ * Edits the room's identity and pricing. Neither status is accepted here:
+ * housekeeping moves through `changeHousekeepingStatus`, which enforces its
+ * state machine, and occupancy only ever moves because of a booking.
  */
 export const updateRoom = async (actor, id, { roomNumber, roomType, floor, price, facilities }) => {
   const room = await findRoomOrFail(id);
@@ -309,52 +369,43 @@ export const updateRoom = async (actor, id, { roomNumber, roomType, floor, price
  * Reserved and occupied are refused: a room is only freed when its booking
  * ends, through `releaseRoom` below.
  */
-export const changeRoomStatus = async (actor, id, { status, note }) => {
+export const changeHousekeepingStatus = async (actor, id, { housekeeping, note }) => {
   const room = await findRoomOrFail(id);
 
   if (!room.isActive) {
-    throw new ApiError(409, "This room is deactivated. Restore it before changing its status.");
+    throw new ApiError(409, "This room is deactivated. Restore it before servicing it.");
   }
 
-  if (RESERVATION_CONTROLLED_STATUSES.includes(status)) {
-    throw new ApiError(
-      409,
-      "Reserved and occupied are set by the reservation and check-in flows, not by hand"
-    );
-  }
-
-  if (status === room.status) {
+  if (housekeeping === room.housekeeping) {
     // Nothing to change, but a new note is still worth recording.
-    if (note !== undefined && note !== room.statusNote) {
-      room.statusNote = note || "";
+    if (note !== undefined && note !== room.housekeepingNote) {
+      room.housekeepingNote = note || "";
       room.updatedBy = actor._id;
       await room.save();
     }
     return getRoomById(room._id);
   }
 
-  if (!canTransitionManually(room.status, status)) {
-    const allowed = getAllowedTransitions(room.status);
-    throw new ApiError(
-      409,
-      allowed.length === 0
-        ? `A ${room.status} room cannot be changed by hand; it is released by the reservation flow`
-        : `A ${room.status} room can only move to: ${allowed.join(", ")}`
-    );
+  if (!canChangeHousekeeping(room.housekeeping, housekeeping)) {
+    const allowed = getAllowedHousekeepingTransitions(room.housekeeping);
+    throw new ApiError(409, `A ${room.housekeeping} room can only move to: ${allowed.join(", ")}`);
   }
 
-  const previousStatus = room.status;
+  // A guest being in the room is no reason to refuse. An occupied room is
+  // serviced every day, and being able to record that is the whole point of
+  // keeping housekeeping separate from occupancy.
+  const previousStatus = room.housekeeping;
 
-  applyStatus(room, status, { note, actorId: actor._id });
+  applyHousekeeping(room, housekeeping, { note, actorId: actor._id });
   room.updatedBy = actor._id;
   await room.save();
 
   await recordAudit({
-    action: AUDIT_ACTIONS.ROOM_STATUS_CHANGED,
+    action: AUDIT_ACTIONS.ROOM_HOUSEKEEPING_CHANGED,
     entity: auditEntity(room),
     actor,
-    description: `Room ${room.roomNumber}: ${previousStatus} to ${status}`,
-    changes: [{ field: "status", from: previousStatus, to: status }],
+    description: `Room ${room.roomNumber}: ${previousStatus} to ${housekeeping}`,
+    changes: [{ field: "housekeeping", from: previousStatus, to: housekeeping }],
     reason: note || "",
   });
 
@@ -375,12 +426,12 @@ export const deactivateRoom = async (actor, id, { note } = {}) => {
   if (room.isInUse()) {
     throw new ApiError(
       409,
-      `Room ${room.roomNumber} is ${room.status}. Wait until the guest checks out before removing it.`
+      `Room ${room.roomNumber} is ${room.occupancy}. Wait until the guest checks out before removing it.`
     );
   }
 
   room.isActive = false;
-  applyStatus(room, ROOM_STATUSES.OUT_OF_SERVICE, {
+  applyHousekeeping(room, HOUSEKEEPING_STATUSES.OUT_OF_ORDER, {
     note: note || "Removed from inventory",
     actorId: actor._id,
   });
@@ -420,7 +471,9 @@ export const restoreRoom = async (actor, id) => {
   }
 
   room.isActive = true;
-  applyStatus(room, ROOM_STATUSES.CLEANING, {
+  // Comes back needing a clean rather than straight to sellable: it has been
+  // sitting unused and should be looked at before a guest is sent to it.
+  applyHousekeeping(room, HOUSEKEEPING_STATUSES.CLEANING, {
     note: "Returned to inventory",
     actorId: actor._id,
   });
@@ -440,9 +493,10 @@ export const restoreRoom = async (actor, id) => {
 /* -------------------------------------------------------------------------- */
 /* Reservation lifecycle hooks                                                */
 /*                                                                            */
-/* The room module owns the room's status, so the reservation and front-desk   */
-/* modules call these instead of writing `status` themselves. They are not     */
-/* exposed as HTTP routes.                                                    */
+/* The room module owns occupancy, so the reservation and front-desk modules   */
+/* call these instead of writing the field themselves. They are not exposed as  */
+/* HTTP routes. None of them touches housekeeping except a departure, which     */
+/* always leaves the room dirty.                                               */
 /* -------------------------------------------------------------------------- */
 
 /** Booking confirmed: available -> reserved. */
@@ -450,10 +504,13 @@ export const reserveRoom = async (id, { actorId = null, note } = {}) => {
   const room = await findRoomOrFail(id);
 
   if (!room.isBookable()) {
-    throw new ApiError(409, `Room ${room.roomNumber} is not available (currently ${room.status})`);
+    throw new ApiError(
+      409,
+      `Room ${room.roomNumber} cannot be held right now (${room.occupancy}, ${room.housekeeping})`
+    );
   }
 
-  applyStatus(room, ROOM_STATUSES.RESERVED, { note, actorId });
+  applyOccupancy(room, OCCUPANCY_STATUSES.RESERVED);
   await room.save();
   return room;
 };
@@ -462,11 +519,11 @@ export const reserveRoom = async (id, { actorId = null, note } = {}) => {
 export const checkInRoom = async (id, { actorId = null, note } = {}) => {
   const room = await findRoomOrFail(id);
 
-  if (room.status !== ROOM_STATUSES.RESERVED) {
-    throw new ApiError(409, `Room ${room.roomNumber} is not reserved (currently ${room.status})`);
+  if (room.occupancy !== OCCUPANCY_STATUSES.RESERVED) {
+    throw new ApiError(409, `Room ${room.roomNumber} is not reserved (currently ${room.occupancy})`);
   }
 
-  applyStatus(room, ROOM_STATUSES.OCCUPIED, { note, actorId });
+  applyOccupancy(room, OCCUPANCY_STATUSES.OCCUPIED);
   await room.save();
   return room;
 };
@@ -482,13 +539,20 @@ export const checkInRoom = async (id, { actorId = null, note } = {}) => {
 export const releaseRoom = async (id, { actorId = null, note } = {}) => {
   const room = await findRoomOrFail(id);
 
-  const nextStatus = RELEASE_STATUS[room.status];
+  const next = RELEASE_STATE[room.occupancy];
 
-  if (!nextStatus) {
+  if (!next) {
     return room;
   }
 
-  applyStatus(room, nextStatus, { note: note ?? "", actorId });
+  applyOccupancy(room, next.occupancy);
+
+  // A departure always leaves the room dirty; a cancellation never touched the
+  // room, so its housekeeping state is left exactly as it was.
+  if (next.housekeeping) {
+    applyHousekeeping(room, next.housekeeping, { note: note ?? "", actorId });
+  }
+
   await room.save();
   return room;
 };

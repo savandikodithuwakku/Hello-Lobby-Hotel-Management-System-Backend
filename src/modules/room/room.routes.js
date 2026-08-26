@@ -6,7 +6,7 @@ import { validateRequest } from "../../shared/middleware/validate.middleware.js"
 import * as roomController from "./room.controller.js";
 import {
   availableRoomsValidation,
-  changeRoomStatusValidation,
+  changeHousekeepingValidation,
   createRoomValidation,
   deactivateRoomValidation,
   listRoomsValidation,
@@ -74,11 +74,11 @@ router.patch(
 
 /** Housekeeping and maintenance transitions, available to staff. */
 router.patch(
-  "/:id/status",
+  "/:id/housekeeping",
   requirePermission(PERMISSIONS.ROOM_MANAGE_STATUS),
-  changeRoomStatusValidation,
+  changeHousekeepingValidation,
   validateRequest,
-  roomController.changeRoomStatus
+  roomController.changeHousekeepingStatus
 );
 
 /** Soft delete: `isActive` goes false, the document and its history remain. */

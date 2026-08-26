@@ -3,12 +3,55 @@ import env from "../../config/env.js";
 import { toDateString } from "../../shared/utils/date.util.js";
 import { money } from "../../shared/utils/money.util.js";
 import {
+  CHARGE_CATEGORY_VALUES,
   INVOICE_STATUSES,
   POLICY,
   balanceOf,
   deriveInvoiceStatus,
   netPaid,
 } from "./payment.constants.js";
+
+/**
+ * One thing the guest consumed during their stay.
+ *
+ * The folio. A booking's `additionalServices` is what was agreed when the room
+ * was booked; these are what was used once the guest was in it - a minibar, a
+ * laundry bag, a late checkout. Keeping them apart means a guest querying the
+ * bill can see which is which, and it means adding a charge to somebody who is
+ * already checked in does not require unfreezing the booking's dates.
+ *
+ * Lines are never edited or removed once posted. A mistake is corrected by
+ * posting a negative-signed reversal, so the folio always adds up.
+ */
+const chargeSchema = new mongoose.Schema(
+  {
+    description: {
+      type: String,
+      required: [true, "A charge needs a description"],
+      trim: true,
+      maxlength: [POLICY.CHARGE_DESCRIPTION_MAX, "Description is too long"],
+    },
+    category: {
+      type: String,
+      enum: CHARGE_CATEGORY_VALUES,
+      required: true,
+    },
+    unitPrice: { type: Number, required: true },
+    quantity: { type: Number, default: 1, min: [1, "Quantity must be at least 1"] },
+    amount: { type: Number, required: true },
+    /** Set on a line that cancels an earlier one out. */
+    reverses: { type: mongoose.Schema.Types.ObjectId, default: null },
+    postedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    postedAt: { type: Date, default: Date.now },
+    note: {
+      type: String,
+      trim: true,
+      maxlength: [POLICY.NOTE_MAX, "Note is too long"],
+      default: "",
+    },
+  },
+  { _id: true }
+);
 
 /**
  * The bill for one reservation.
@@ -54,8 +97,10 @@ const invoiceSchema = new mongoose.Schema(
       uppercase: true,
       trim: true,
     },
+    /** What the guest used during the stay. See `chargeSchema` above. */
+    charges: { type: [chargeSchema], default: [] },
     amounts: {
-      /** The full cost of the stay, copied from the reservation. */
+      /** The stay plus everything charged to the room. */
       total: { type: Number, required: true, min: 0 },
       /** What must be in before the room is held, copied from the reservation. */
       advance: { type: Number, required: true, min: 0 },
@@ -66,7 +111,7 @@ const invoiceSchema = new mongoose.Schema(
     },
     /** When the advance must be in, or the hold on the room lapses. */
     advanceDueAt: { type: Date, required: true },
-    /** When the rest must be in - arrival day at the latest. */
+    /** When the rest must be in - departure day, when the guest settles up. */
     dueAt: { type: Date, required: true },
 
     issuedAt: { type: Date, default: Date.now },
@@ -90,6 +135,11 @@ const invoiceSchema = new mongoose.Schema(
 /** "Show me the bills that are late" - the query the front desk runs most. */
 invoiceSchema.index({ dueAt: 1, voidedAt: 1 });
 invoiceSchema.index({ customer: 1, createdAt: -1 });
+
+/** Everything charged to the room during the stay. */
+invoiceSchema.virtual("chargesTotal").get(function invoiceChargesTotal() {
+  return money(this.charges.reduce((sum, charge) => sum + charge.amount, 0));
+});
 
 /** What the guest has paid and kept, after refunds. */
 invoiceSchema.virtual("netPaid").get(function invoiceNetPaid() {
@@ -201,9 +251,23 @@ invoiceSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
       advance: this.amounts.advance,
       paid: this.amounts.paid,
       refunded: this.amounts.refunded,
+      charges: this.chargesTotal,
       netPaid: this.netPaid,
       balanceDue: this.balanceDue,
     },
+
+    charges: this.charges.map((charge) => ({
+      id: charge._id.toString(),
+      description: charge.description,
+      category: charge.category,
+      unitPrice: charge.unitPrice,
+      quantity: charge.quantity,
+      amount: charge.amount,
+      reverses: charge.reverses?.toString() ?? null,
+      postedBy: charge.postedBy?.toString() ?? null,
+      postedAt: charge.postedAt,
+      note: charge.note,
+    })),
 
     advanceDueAt: this.advanceDueAt,
     dueAt: this.dueAt,

@@ -8,7 +8,9 @@
     "start": "node src/server.js",
     "seed:super-admin": "node src/scripts/seedSuperAdmin.js",
     "mail:test": "node src/scripts/testEmail.js",
-    "seed:rooms": "node src/scripts/seedRooms.js"
+    "seed:rooms": "node src/scripts/seedRooms.js",
+    "migrate:room-statuses": "node src/scripts/migrateRoomStatuses.js",
+    "migrate:balance-deadlines": "node src/scripts/migrateBalanceDeadlines.js"
   },
   "keywords": [],
   "author": "",

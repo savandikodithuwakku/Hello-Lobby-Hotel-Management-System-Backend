@@ -50,6 +50,12 @@ export const PERMISSIONS = Object.freeze({
   // Front desk operations
   FRONTDESK_CHECKIN: "frontdesk:checkin",
   FRONTDESK_CHECKOUT: "frontdesk:checkout",
+  /**
+   * Lets a manager check a guest in whose advance has not been paid. Held above
+   * front-desk level on purpose: it is the one condition the desk may wave
+   * through, and every use of it is written to the audit log with a reason.
+   */
+  FRONTDESK_OVERRIDE_PAYMENT: "frontdesk:override_payment",
   FRONTDESK_TICKET_MANAGE: "frontdesk:ticket_manage",
   FRONTDESK_TICKET_CREATE: "frontdesk:ticket_create",
 

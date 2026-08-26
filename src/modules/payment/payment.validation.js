@@ -9,6 +9,7 @@ import {
   sortRule,
 } from "../../shared/validators/common.validators.js";
 import {
+  POSTABLE_CHARGE_CATEGORIES,
   INVOICE_SORT_OPTIONS,
   INVOICE_STATUS_VALUES,
   MANUAL_METHODS,
@@ -117,6 +118,43 @@ export const refundValidation = (paramName = "id") => [
   ...addressValidation(paramName),
   amountField({ optional: true }),
   mongoIdBody("transaction", "Invalid payment reference", { optional: true }),
+  noteField("reason", "Reason"),
+];
+
+/**
+ * A charge posted to a room during the stay.
+ *
+ * The description is required and never generated: it is the line the guest
+ * reads on their bill, and "other charge" answers nobody's question about what
+ * they are being asked to pay for.
+ */
+export const postChargeValidation = (paramName = "id") => [
+  ...addressValidation(paramName),
+  body("description")
+    .trim()
+    .notEmpty()
+    .withMessage("Say what the charge is for")
+    .isLength({ max: POLICY.CHARGE_DESCRIPTION_MAX })
+    .withMessage("The description is too long"),
+  body("category")
+    .optional()
+    .isIn(POSTABLE_CHARGE_CATEGORIES)
+    .withMessage(`The category must be one of: ${POSTABLE_CHARGE_CATEGORIES.join(", ")}`),
+  body("unitPrice")
+    .isFloat({ gt: 0, max: POLICY.MAX_AMOUNT })
+    .withMessage("The price must be greater than zero")
+    .toFloat(),
+  body("quantity")
+    .optional()
+    .isInt({ min: 1, max: 999 })
+    .withMessage("Quantity must be a whole number of at least 1")
+    .toInt(),
+  noteField(),
+];
+
+export const reverseChargeValidation = (paramName = "id") => [
+  ...addressValidation(paramName),
+  ...mongoIdParam("chargeId", "charge"),
   noteField("reason", "Reason"),
 ];
 

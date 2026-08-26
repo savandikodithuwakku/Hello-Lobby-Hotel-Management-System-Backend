@@ -111,6 +111,17 @@ const reservationSchema = new mongoose.Schema(
       roomRate: { type: Number, required: true, min: 0 },
       roomSubtotal: { type: Number, required: true, min: 0 },
       servicesSubtotal: { type: Number, default: 0, min: 0 },
+      /**
+       * What the guest consumed during the stay - a minibar, laundry, a late
+       * checkout. Kept apart from `servicesSubtotal`, which is what was agreed
+       * when the booking was made: the two answer different questions and a
+       * guest querying their bill needs to see which is which.
+       *
+       * The itemised lines live on the invoice, in the payments module. Only
+       * the total is mirrored here, so the booking still knows what it is
+       * worth without the reservation module having to know about billing.
+       */
+      extraCharges: { type: Number, default: 0, min: 0 },
       totalAmount: { type: Number, required: true, min: 0 },
     },
     additionalServices: {
@@ -123,7 +134,7 @@ const reservationSchema = new mongoose.Schema(
       amountPaid: { type: Number, default: 0, min: 0 },
       /** When the advance must be in, or the hold lapses. */
       advanceDeadline: { type: Date, required: true },
-      /** When the rest must be in - arrival day at the latest. */
+      /** When the rest must be in - departure day, when the guest settles up. */
       balanceDeadline: { type: Date, required: true },
       lastPaymentAt: { type: Date, default: null },
     },
@@ -194,10 +205,17 @@ reservationSchema.methods.recalculateTotals = function recalculateTotals() {
 
   this.pricing.roomSubtotal = roomSubtotal;
   this.pricing.servicesSubtotal = servicesSubtotal;
-  this.pricing.totalAmount = money(roomSubtotal + servicesSubtotal);
-  this.payment.advanceAmount = money(
-    (this.pricing.totalAmount * POLICY.ADVANCE_PERCENTAGE) / 100
-  );
+  this.pricing.totalAmount = money(roomSubtotal + servicesSubtotal + this.pricing.extraCharges);
+
+  // The advance is what the guest had to pay to hold the room, and it is fixed
+  // the moment the booking is confirmed. Recalculating it afterwards would mean
+  // a guest who ordered a sandwich on their second night was suddenly told they
+  // had not paid enough to confirm a booking they checked into yesterday.
+  if (this.status === RESERVATION_STATUSES.PENDING) {
+    this.payment.advanceAmount = money(
+      (this.pricing.totalAmount * POLICY.ADVANCE_PERCENTAGE) / 100
+    );
+  }
 
   return this;
 };
@@ -242,7 +260,8 @@ reservationSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
           id: room._id.toString(),
           roomNumber: room.roomNumber,
           floor: room.floor,
-          status: room.status,
+          occupancy: room.occupancy,
+          housekeeping: room.housekeeping,
         }
       : { id: this.room?.toString() ?? null },
 
@@ -259,6 +278,7 @@ reservationSchema.methods.toSafeObject = function toSafeObject(extra = {}) {
       roomRate: this.pricing.roomRate,
       roomSubtotal: this.pricing.roomSubtotal,
       servicesSubtotal: this.pricing.servicesSubtotal,
+      extraCharges: this.pricing.extraCharges,
       totalAmount: this.pricing.totalAmount,
     },
     additionalServices: this.additionalServices.map((service) => ({

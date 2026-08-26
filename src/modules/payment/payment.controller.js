@@ -2,6 +2,7 @@ import { sendCreated, sendOk } from "../../shared/utils/ApiResponse.js";
 import asyncHandler from "../../shared/utils/asyncHandler.js";
 import * as paymentService from "./payment.service.js";
 import * as refundService from "./refund.service.js";
+import * as folioService from "./folio.service.js";
 import { describeAvailableMethods } from "./providers/index.js";
 import { PAYMENT_MESSAGES } from "./payment.constants.js";
 
@@ -103,6 +104,29 @@ export const handleProviderCallback = asyncHandler(async (req, res) => {
   });
 
   sendOk(res, "Callback processed", result);
+});
+
+/* ---------------------------------- Folio --------------------------------- */
+
+export const listCharges = asyncHandler(async (req, res) => {
+  const result = await folioService.listCharges(addressOf(req), req.user);
+  sendOk(res, "Charges fetched successfully", result);
+});
+
+export const postCharge = asyncHandler(async (req, res) => {
+  const result = await folioService.postCharge(req.user, addressOf(req), req.body);
+  sendCreated(res, `${result.charge.description} charged to the room`, result);
+});
+
+export const reverseCharge = asyncHandler(async (req, res) => {
+  const result = await folioService.reverseCharge(
+    req.user,
+    addressOf(req),
+    req.params.chargeId,
+    req.body
+  );
+
+  sendOk(res, "Charge taken off the bill", result);
 });
 
 /* -------------------------------- Refunding ------------------------------- */

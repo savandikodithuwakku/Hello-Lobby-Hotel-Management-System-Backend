@@ -58,7 +58,10 @@ export const AUDIT_ACTIONS = Object.freeze({
   // Inventory.
   ROOM_CREATED: "room.created",
   ROOM_UPDATED: "room.updated",
-  ROOM_STATUS_CHANGED: "room.status_changed",
+  /** Housekeeping serviced, inspected or condemned a room. Occupancy has no
+   * action of its own - it only ever moves because of a booking, which is
+   * already recorded against that booking. */
+  ROOM_HOUSEKEEPING_CHANGED: "room.housekeeping_changed",
   ROOM_DEACTIVATED: "room.deactivated",
   ROOM_RESTORED: "room.restored",
   ROOM_TYPE_CREATED: "room_type.created",
@@ -72,7 +75,15 @@ export const AUDIT_ACTIONS = Object.freeze({
   RESERVATION_UPDATED: "reservation.updated",
   RESERVATION_STATUS_CHANGED: "reservation.status_changed",
 
+  // The front desk. An override is a manager deciding a rule does not apply
+  // this once, which is precisely the kind of thing a log exists for.
+  FRONTDESK_OVERRIDE: "frontdesk.override",
+
   // Money.
+  /** Something the guest used was charged to their room. */
+  FOLIO_CHARGE_POSTED: "folio.charge_posted",
+  /** A charge was taken back off the bill. The original line stays. */
+  FOLIO_CHARGE_REVERSED: "folio.charge_reversed",
   PAYMENT_RECORDED: "payment.recorded",
   PAYMENT_CHECKOUT_STARTED: "payment.checkout_started",
   PAYMENT_SETTLED: "payment.settled",
@@ -90,6 +101,7 @@ export const AUDIT_ACTION_VALUES = Object.freeze(Object.values(AUDIT_ACTIONS));
  * here means the filter is defined once instead of being retyped in the UI.
  */
 export const SECURITY_ACTIONS = Object.freeze([
+  AUDIT_ACTIONS.FRONTDESK_OVERRIDE,
   AUDIT_ACTIONS.AUTH_LOGIN,
   AUDIT_ACTIONS.AUTH_LOGIN_FAILED,
   AUDIT_ACTIONS.AUTH_PASSWORD_CHANGED,

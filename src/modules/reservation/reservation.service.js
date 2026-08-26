@@ -9,7 +9,7 @@ import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
 import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import User from "../user/user.model.js";
 import Room from "../room/room.model.js";
-import { ROOM_STATUSES } from "../room/room.constants.js";
+import { OCCUPANCY_STATUSES, SELLABLE_HOUSEKEEPING } from "../room/room.constants.js";
 import { checkInRoom, releaseRoom, reserveRoom } from "../room/room.service.js";
 import Reservation, { generateReference } from "./reservation.model.js";
 import {
@@ -33,7 +33,7 @@ import {
 const withRelations = (query) =>
   query
     .populate("customer", "name email phone")
-    .populate("room", "roomNumber floor status")
+    .populate("room", "roomNumber floor occupancy housekeeping")
     .populate("roomType", "name maxOccupancy");
 
 /* -------------------------------------------------------------------------- */
@@ -64,6 +64,7 @@ const auditSnapshot = (reservation) => ({
   services: reservation.additionalServices.map(
     (service) => `${service.name} x${service.quantity}`
   ),
+  extraCharges: reservation.pricing.extraCharges,
   totalAmount: reservation.pricing.totalAmount,
   advanceAmount: reservation.payment.advanceAmount,
 });
@@ -113,7 +114,9 @@ const holdRoomIfCurrent = async (reservation, actorId) => {
 
   const room = await Room.findById(toId(reservation.room));
 
-  if (room?.status === ROOM_STATUSES.AVAILABLE) {
+  // Only a room nobody holds can be put on hold. Whether it has been cleaned
+  // does not come into it - housekeeping has until the guest arrives.
+  if (room?.occupancy === OCCUPANCY_STATUSES.VACANT) {
     await reserveRoom(room._id, { actorId, note: `Booking ${reservation.reference}` });
   }
 };
@@ -129,7 +132,8 @@ const releaseRoomIfHeld = async (reservation, actorId, note) => {
   if (!room) return;
 
   const heldByThisBooking =
-    room.status === ROOM_STATUSES.RESERVED || room.status === ROOM_STATUSES.OCCUPIED;
+    room.occupancy === OCCUPANCY_STATUSES.RESERVED ||
+    room.occupancy === OCCUPANCY_STATUSES.OCCUPIED;
 
   if (heldByThisBooking && reservation.isCurrent()) {
     await releaseRoom(room._id, { actorId, note });
@@ -199,7 +203,13 @@ export const createReservation = async (actor, payload) => {
     nights: stay.nights,
     guests: payload.guests,
     status: RESERVATION_STATUSES.PENDING,
-    pricing: { roomRate: rate, roomSubtotal: 0, servicesSubtotal: 0, totalAmount: 0 },
+    pricing: {
+      roomRate: rate,
+      roomSubtotal: 0,
+      servicesSubtotal: 0,
+      extraCharges: 0,
+      totalAmount: 0,
+    },
     additionalServices: normaliseServices(payload.additionalServices),
     payment: {
       advanceAmount: 0,
@@ -213,8 +223,11 @@ export const createReservation = async (actor, payload) => {
           stay.checkIn.getTime()
         )
       ),
-      // The rest is due by arrival.
-      balanceDeadline: stay.checkIn,
+      // The rest is due when the guest leaves, not when they arrive. The
+      // advance holds the room; everything else - including whatever they use
+      // while they are here - is settled at the desk on the way out, which is
+      // the same moment check-out refuses to let anything go unpaid.
+      balanceDeadline: stay.checkOut,
     },
     specialRequests: payload.specialRequests || "",
     createdBy: actor._id,
@@ -450,7 +463,7 @@ export const updateReservation = async (actor, id, payload) => {
     reservation.checkOut = stay.checkOut;
     reservation.nights = stay.nights;
     reservation.guests = guests;
-    reservation.payment.balanceDeadline = stay.checkIn;
+    reservation.payment.balanceDeadline = stay.checkOut;
 
     if (roomChanged) {
       reservation.room = room._id;
@@ -618,14 +631,24 @@ export const checkInReservation = async (actor, id, { note } = {}) => {
     throw new ApiError(404, "The room for this reservation no longer exists");
   }
 
-  // A booking made weeks ago has not been holding the room; put it on hold now,
-  // then walk it through the same reserved -> occupied path as everything else.
-  if (room.status === ROOM_STATUSES.AVAILABLE) {
-    await reserveRoom(room._id, { actorId: actor._id, note: `Arrival ${reservation.reference}` });
-  } else if (room.status !== ROOM_STATUSES.RESERVED) {
+  // The room has to be fit for a guest to walk into. This is the one moment
+  // housekeeping actually gates a booking: a dirty room can be sold for a
+  // future date, but nobody may be handed the key to one today.
+  if (!SELLABLE_HOUSEKEEPING.includes(room.housekeeping)) {
     throw new ApiError(
       409,
-      `Room ${room.roomNumber} is ${room.status} and cannot take an arrival right now`
+      `Room ${room.roomNumber} is ${room.housekeeping} and is not ready for a guest`
+    );
+  }
+
+  // A booking made weeks ago has not been holding the room; put it on hold now,
+  // then walk it through the same reserved -> occupied path as everything else.
+  if (room.occupancy === OCCUPANCY_STATUSES.VACANT) {
+    await reserveRoom(room._id, { actorId: actor._id, note: `Arrival ${reservation.reference}` });
+  } else if (room.occupancy !== OCCUPANCY_STATUSES.RESERVED) {
+    throw new ApiError(
+      409,
+      `Room ${room.roomNumber} is ${room.occupancy} and cannot take an arrival right now`
     );
   }
 
@@ -724,6 +747,29 @@ export const recordPayment = async (actor, id, { amount, note = "" }) => {
     autoConfirmed: autoConfirm,
     note,
   };
+};
+
+/**
+ * Tells a booking what its folio now comes to.
+ *
+ * The itemised lines live on the invoice, in the payments module, because that
+ * is where money belongs. The booking only needs the total, so that what it
+ * says it is worth still matches its bill - `updateReservation` refuses an edit
+ * that would drop the total below what has been paid, and that check would be
+ * wrong if it could not see the charges.
+ *
+ * Called only by the payments module, in the same way as `recordPayment`.
+ */
+export const applyFolioTotal = async (actor, id, { total }) => {
+  const reservation = await findReservationOrFail(id);
+
+  reservation.pricing.extraCharges = money(Math.max(total, 0));
+  reservation.recalculateTotals();
+  reservation.updatedBy = actor?._id ?? reservation.updatedBy;
+
+  await reservation.save();
+
+  return { reservation: await getReservationById(reservation._id, actor) };
 };
 
 /**

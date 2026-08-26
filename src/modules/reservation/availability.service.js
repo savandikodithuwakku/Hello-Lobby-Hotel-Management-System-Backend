@@ -3,9 +3,9 @@ import { toDateString } from "../../shared/utils/date.util.js";
 import Room from "../room/room.model.js";
 import RoomType from "../room/roomType.model.js";
 import Reservation from "./reservation.model.js";
+import { NON_BOOKABLE_HOUSEKEEPING } from "../room/room.constants.js";
 import {
   BLOCKING_STATUSES,
-  NON_BOOKABLE_ROOM_STATUSES,
   POLICY,
   nightsBetween,
   toDateOnly,
@@ -88,16 +88,18 @@ export const findConflicts = ({ checkIn, checkOut, rooms, excludeReservationId }
 /** Rooms that cannot be sold at all, regardless of dates. */
 const nonBookableRoomFilter = () => ({
   isActive: true,
-  status: { $nin: NON_BOOKABLE_ROOM_STATUSES },
+  housekeeping: { $nin: NON_BOOKABLE_HOUSEKEEPING },
 });
 
 /**
  * Every room free for the whole requested range.
  *
- * Note what is *not* consulted: whether the room happens to be occupied right
- * now. A room with a guest in it today is perfectly bookable for next month -
- * that is decided by the existing reservations, not by the live status. Only a
- * room withdrawn from service or under maintenance is excluded outright.
+ * Note what is *not* consulted: the room's live occupancy, and whether it has
+ * been cleaned. A room with a guest in it today is perfectly bookable for next
+ * month, and a room that is dirty this morning will have been serviced long
+ * before a future arrival - refusing either would cost a sale for no reason.
+ * Whether a room is free on given dates is decided by the existing bookings.
+ * Only a room withdrawn from the inventory or out of order is excluded outright.
  */
 export const findAvailableRooms = async ({
   checkIn,
@@ -221,8 +223,11 @@ export const assertRoomIsAvailable = async ({
     throw new ApiError(409, `Room ${roomDoc.roomNumber} has been removed from the inventory`);
   }
 
-  if (NON_BOOKABLE_ROOM_STATUSES.includes(roomDoc.status)) {
-    throw new ApiError(409, `Room ${roomDoc.roomNumber} is ${roomDoc.status} and cannot be booked`);
+  if (NON_BOOKABLE_HOUSEKEEPING.includes(roomDoc.housekeeping)) {
+    throw new ApiError(
+      409,
+      `Room ${roomDoc.roomNumber} is ${roomDoc.housekeeping} and cannot be booked`
+    );
   }
 
   if (!roomDoc.roomType?.isActive) {

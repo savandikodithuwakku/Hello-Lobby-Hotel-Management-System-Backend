@@ -122,21 +122,14 @@ router.post(
   reservationController.markNoShow
 );
 
-router.post(
-  "/:id/check-in",
-  requirePermission(PERMISSIONS.FRONTDESK_CHECKIN),
-  transitionValidation,
-  validateRequest,
-  reservationController.checkIn
-);
-
-router.post(
-  "/:id/check-out",
-  requirePermission(PERMISSIONS.FRONTDESK_CHECKOUT),
-  transitionValidation,
-  validateRequest,
-  reservationController.checkOut
-);
+/**
+ * Arrivals and departures are not here. They are front-desk operations with
+ * conditions of their own - the advance has to be paid, the room has to be fit
+ * for a guest, nothing may be left outstanding - so they live in the front-desk
+ * module, which can see the bill and the room as well as the booking. See
+ * `POST /front-desk/arrivals/:id/check-in` and
+ * `POST /front-desk/departures/:id/check-out`.
+ */
 
 router.post(
   "/:id/complete",

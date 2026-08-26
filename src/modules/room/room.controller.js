@@ -32,9 +32,9 @@ export const updateRoom = asyncHandler(async (req, res) => {
   sendOk(res, "Room updated successfully", { room });
 });
 
-export const changeRoomStatus = asyncHandler(async (req, res) => {
-  const room = await roomService.changeRoomStatus(req.user, req.params.id, req.body);
-  sendOk(res, `Room ${room.roomNumber} is now ${room.status}`, { room });
+export const changeHousekeepingStatus = asyncHandler(async (req, res) => {
+  const room = await roomService.changeHousekeepingStatus(req.user, req.params.id, req.body);
+  sendOk(res, `Room ${room.roomNumber} is now ${room.housekeeping}`, { room });
 });
 
 export const deactivateRoom = asyncHandler(async (req, res) => {

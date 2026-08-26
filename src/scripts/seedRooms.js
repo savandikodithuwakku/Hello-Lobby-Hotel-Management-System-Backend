@@ -13,7 +13,7 @@ import User from "../modules/user/user.model.js";
 import RoomType from "../modules/room/roomType.model.js";
 import Room from "../modules/room/room.model.js";
 import { USER_ROLES } from "../modules/user/user.constants.js";
-import { ROOM_STATUSES } from "../modules/room/room.constants.js";
+import { HOUSEKEEPING_STATUSES, OCCUPANCY_STATUSES } from "../modules/room/room.constants.js";
 
 /**
  * Photographs come from Unsplash's image CDN, which serves a stable URL per
@@ -271,10 +271,13 @@ const run = async () => {
       roomNumber,
       roomType: roomType._id,
       floor,
-      status: ROOM_STATUSES.AVAILABLE,
+      occupancy: OCCUPANCY_STATUSES.VACANT,
+      // Seeded rooms are presented as ready so the hotel is sellable straight
+      // after seeding; a real room starts dirty until somebody services it.
+      housekeeping: HOUSEKEEPING_STATUSES.INSPECTED,
       price: override?.price ?? null,
       facilities: override?.facilities ?? [],
-      statusChangedBy: owner?._id ?? null,
+      housekeepingChangedBy: owner?._id ?? null,
       createdBy: owner?._id ?? null,
       updatedBy: owner?._id ?? null,
     });
