@@ -5,6 +5,8 @@ import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive } from "../../shared/utils/text.util.js";
 import { sendEmailSafely } from "../../shared/mail/mailer.js";
 import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES, AUDIT_OUTCOMES } from "../audit/audit.constants.js";
+import { recordAudit } from "../audit/audit.service.js";
 import User from "../user/user.model.js";
 import Reservation from "../reservation/reservation.model.js";
 import { recordPayment as applyPaymentToReservation } from "../reservation/reservation.service.js";
@@ -37,6 +39,20 @@ const withInvoiceRelations = (query) =>
 
 const withTransactionRelations = (query) =>
   query.populate("customer", "name email").populate("recordedBy", "name");
+
+/* -------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/*                                                                            */
+/* Money is the part of the system most worth being able to account for later, */
+/* so every movement is recorded against the transaction it belongs to - the   */
+/* receipt number is what a person would quote when asking about it.           */
+/* -------------------------------------------------------------------------- */
+
+export const auditTransaction = (transaction) => ({
+  type: AUDIT_ENTITIES.TRANSACTION,
+  id: transaction._id,
+  label: transaction.reference,
+});
 
 /* -------------------------------------------------------------------------- */
 /* Access                                                                     */
@@ -522,6 +538,22 @@ export const recordManualPayment = async (actor, address, payload) => {
   const customer = await loadCustomer(invoice);
   await sendReceipt(invoice, transaction, customer);
 
+  await recordAudit({
+    action: AUDIT_ACTIONS.PAYMENT_RECORDED,
+    entity: auditTransaction(transaction),
+    actor,
+    description:
+      `Took ${amount} ${invoice.currency} by ${METHOD_LABELS[method]} against ${invoice.reference}`,
+    changes: [
+      {
+        field: "invoice.paid",
+        from: String(money(invoice.amounts.paid - amount)),
+        to: String(invoice.amounts.paid),
+      },
+    ],
+    reason: payload.externalReference || "",
+  });
+
   return {
     invoice: (await syncInvoice(invoice)).toSafeObject(),
     transaction: transaction.toSafeObject(),
@@ -597,6 +629,15 @@ export const startCheckout = async (actor, address, payload) => {
     };
   }
 
+  await recordAudit({
+    action: AUDIT_ACTIONS.PAYMENT_CHECKOUT_STARTED,
+    entity: auditTransaction(transaction),
+    actor,
+    description:
+      `Started an online payment of ${amount} ${invoice.currency} against ${invoice.reference} ` +
+      `via ${provider.name}`,
+  });
+
   return {
     transaction: transaction.toSafeObject(),
     invoice: invoice.toSafeObject(),
@@ -621,6 +662,18 @@ const completeTransaction = async (transaction, { status, providerReference, pro
   if (status !== TRANSACTION_STATUSES.SUCCESS) {
     transaction.close(status, { reason, providerStatus });
     await transaction.save();
+
+    // No actor: a provider callback has no signed-in account behind it, and the
+    // audit log says "System" rather than pretending somebody did this.
+    await recordAudit({
+      action: AUDIT_ACTIONS.PAYMENT_FAILED,
+      entity: auditTransaction(transaction),
+      description: `Payment ${transaction.reference} of ${transaction.amount} did not go through`,
+      changes: [{ field: "status", from: TRANSACTION_STATUSES.PENDING, to: status }],
+      outcome: AUDIT_OUTCOMES.FAILURE,
+      reason: reason || providerStatus || "",
+    });
+
     return { transaction, changed: true };
   }
 
@@ -659,6 +712,16 @@ const completeTransaction = async (transaction, { status, providerReference, pro
   // The guest is the actor: nobody at the hotel touched this money.
   await applySettledPayment(invoice, transaction, customer);
   await sendReceipt(invoice, transaction, customer);
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.PAYMENT_SETTLED,
+    entity: auditTransaction(transaction),
+    actor: customer,
+    description:
+      `Online payment of ${transaction.amount} ${invoice.currency} completed against ` +
+      `${invoice.reference}`,
+    changes: [{ field: "status", from: TRANSACTION_STATUSES.PENDING, to: TRANSACTION_STATUSES.SUCCESS }],
+  });
 
   return { transaction, invoice, changed: true };
 };

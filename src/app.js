@@ -7,6 +7,7 @@ import env from "./config/env.js";
 import { API_PREFIX, getAllowedOrigins } from "./config/app.config.js";
 import modulesRouter from "./modules/index.js";
 import { globalRateLimiter } from "./shared/middleware/rateLimit.middleware.js";
+import { attachRequestContext } from "./shared/middleware/requestContext.middleware.js";
 import { notFoundHandler } from "./shared/middleware/notFound.middleware.js";
 import { errorHandler } from "./shared/middleware/error.middleware.js";
 
@@ -38,6 +39,11 @@ app.use(
 app.use(express.json({ limit: "10kb" }));
 app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 app.use(cookieParser());
+
+// Opens the per-request context (address, device, and later the signed-in
+// account) that the audit log reads. Registered before the routers so every
+// handler below it can be recorded with where the request came from.
+app.use(attachRequestContext);
 
 if (!env.isProduction) {
   app.use(morgan("dev"));

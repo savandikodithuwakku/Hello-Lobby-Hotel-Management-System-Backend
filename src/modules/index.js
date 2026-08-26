@@ -5,6 +5,7 @@ import roomTypeRoutes from "./room/roomType.routes.js";
 import roomRoutes from "./room/room.routes.js";
 import reservationRoutes from "./reservation/reservation.routes.js";
 import paymentRoutes from "./payment/payment.routes.js";
+import auditRoutes from "./audit/audit.routes.js";
 
 /**
  * Feature modules are mounted here and nowhere else. Adding a module means
@@ -18,5 +19,6 @@ modulesRouter.use("/room-types", roomTypeRoutes);
 modulesRouter.use("/rooms", roomRoutes);
 modulesRouter.use("/reservations", reservationRoutes);
 modulesRouter.use("/payments", paymentRoutes);
+modulesRouter.use("/audit", auditRoutes);
 
 export default modulesRouter;

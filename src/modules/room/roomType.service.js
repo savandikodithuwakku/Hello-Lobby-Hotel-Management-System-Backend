@@ -1,4 +1,6 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
+import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive, equalsInsensitive } from "../../shared/utils/text.util.js";
 import { PERMISSIONS } from "../auth/rbac/permissions.js";
@@ -118,6 +120,29 @@ export const getRoomTypeById = async (id, viewer = null) => {
   return roomType.toSafeObject({ roomCount, activeRoomCount });
 };
 
+
+/* -------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/* -------------------------------------------------------------------------- */
+
+const auditEntity = (roomType) => ({
+  type: AUDIT_ENTITIES.ROOM_TYPE,
+  id: roomType._id,
+  label: roomType.name,
+});
+
+/** The fields worth recording a change to. Base price is the important one -
+ * it is what every future booking of this type will be quoted at. */
+const AUDITED_FIELDS = ["name", "description", "basePrice", "maxOccupancy", "facilities"];
+
+const auditSnapshot = (roomType) =>
+  Object.fromEntries(
+    AUDITED_FIELDS.map((field) => [
+      field,
+      Array.isArray(roomType[field]) ? [...roomType[field]] : roomType[field],
+    ])
+  );
+
 export const createRoomType = async (actor, payload) => {
   if (await RoomType.exists(byName(payload.name))) {
     throw new ApiError(409, `A room type named "${payload.name.trim()}" already exists`);
@@ -129,11 +154,20 @@ export const createRoomType = async (actor, payload) => {
     updatedBy: actor._id,
   });
 
+  await recordAudit({
+    action: AUDIT_ACTIONS.ROOM_TYPE_CREATED,
+    entity: auditEntity(roomType),
+    actor,
+    description: `Added the room type "${roomType.name}" at ${roomType.basePrice}`,
+  });
+
   return roomType.toSafeObject({ roomCount: 0 });
 };
 
 export const updateRoomType = async (actor, id, payload) => {
   const roomType = await findTypeOrFail(id);
+
+  const before = auditSnapshot(roomType);
 
   if (payload.name !== undefined) {
     const clash = await RoomType.findOne(byName(payload.name));
@@ -150,6 +184,15 @@ export const updateRoomType = async (actor, id, payload) => {
 
   roomType.updatedBy = actor._id;
   await roomType.save();
+
+  await recordUpdate({
+    action: AUDIT_ACTIONS.ROOM_TYPE_UPDATED,
+    entity: auditEntity(roomType),
+    actor,
+    before,
+    after: auditSnapshot(roomType),
+    description: `Edited the room type "${roomType.name}"`,
+  });
 
   return getRoomTypeById(roomType._id, actor);
 };
@@ -179,6 +222,13 @@ export const deactivateRoomType = async (actor, id) => {
   roomType.updatedBy = actor._id;
   await roomType.save();
 
+  await recordAudit({
+    action: AUDIT_ACTIONS.ROOM_TYPE_DEACTIVATED,
+    entity: auditEntity(roomType),
+    actor,
+    description: `Withdrew the room type "${roomType.name}"`,
+  });
+
   return getRoomTypeById(roomType._id, actor);
 };
 
@@ -188,6 +238,13 @@ export const restoreRoomType = async (actor, id) => {
   roomType.isActive = true;
   roomType.updatedBy = actor._id;
   await roomType.save();
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.ROOM_TYPE_RESTORED,
+    entity: auditEntity(roomType),
+    actor,
+    description: `Restored the room type "${roomType.name}"`,
+  });
 
   return getRoomTypeById(roomType._id, actor);
 };

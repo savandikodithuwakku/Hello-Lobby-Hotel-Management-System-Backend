@@ -1,4 +1,6 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
+import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive } from "../../shared/utils/text.util.js";
 import env from "../../config/env.js";
@@ -100,6 +102,22 @@ export const getUserById = async (userId) => {
   return user.toSafeObject();
 };
 
+
+/* -------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/*                                                                            */
+/* Account and privilege changes are the entries a security review reads       */
+/* first, so every one of them below is recorded - who was changed, by whom,   */
+/* and what the value was before.                                              */
+/* -------------------------------------------------------------------------- */
+
+/** How an account is named in the audit log: its email, which is unique. */
+const auditEntity = (user) => ({
+  type: AUDIT_ENTITIES.USER,
+  id: user._id,
+  label: user.email,
+});
+
 /**
  * Creates a staff/admin account. No password is chosen by the administrator:
  * the new user receives a set-password link, so the credential is only ever
@@ -138,12 +156,21 @@ export const createUser = async (actor, { name, email, role, phone, address }) =
     }),
   });
 
+  await recordAudit({
+    action: AUDIT_ACTIONS.USER_CREATED,
+    entity: auditEntity(user),
+    actor,
+    description: `Created a ${user.role} account for ${user.email}`,
+  });
+
   return user.toSafeObject();
 };
 
 export const updateUser = async (actor, userId, { name, phone, avatar, address }) => {
   const user = await findUserOrFail(userId);
   assertCanManage(actor, user);
+
+  const before = { name: user.name, phone: user.phone, avatar: user.avatar, address: user.address };
 
   applyAddress(user, address);
 
@@ -152,6 +179,16 @@ export const updateUser = async (actor, userId, { name, phone, avatar, address }
   if (avatar !== undefined) user.avatar = avatar;
 
   await user.save();
+
+  await recordUpdate({
+    action: AUDIT_ACTIONS.USER_UPDATED,
+    entity: auditEntity(user),
+    actor,
+    before,
+    after: { name: user.name, phone: user.phone, avatar: user.avatar, address: user.address },
+    description: `Edited the account ${user.email}`,
+  });
+
   return user.toSafeObject();
 };
 
@@ -160,11 +197,21 @@ export const changeUserRole = async (actor, userId, { role }) => {
   assertCanManage(actor, user);
   assertCanAssignRole(actor, role);
 
+  const previousRole = user.role;
+
   user.role = role;
   await user.save();
 
   // The role is baked into issued access tokens, so old sessions must go.
   await revokeAllSessions(user._id, { reason: SESSION_REVOKE_REASONS.REVOKED_BY_ADMIN });
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.USER_ROLE_CHANGED,
+    entity: auditEntity(user),
+    actor,
+    description: `Changed ${user.email} from ${previousRole} to ${role}`,
+    changes: [{ field: "role", from: previousRole, to: role }],
+  });
 
   return user.toSafeObject();
 };
@@ -172,6 +219,8 @@ export const changeUserRole = async (actor, userId, { role }) => {
 export const changeUserStatus = async (actor, userId, { status }) => {
   const user = await findUserOrFail(userId);
   assertCanManage(actor, user);
+
+  const previousStatus = user.status;
 
   user.status = status;
   if (status === USER_STATUSES.ACTIVE) {
@@ -182,6 +231,14 @@ export const changeUserStatus = async (actor, userId, { status }) => {
   if (LOGIN_BLOCKING_STATUSES.includes(status)) {
     await revokeAllSessions(user._id, { reason: SESSION_REVOKE_REASONS.REVOKED_BY_ADMIN });
   }
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
+    entity: auditEntity(user),
+    actor,
+    description: `Set ${user.email} to ${status}`,
+    changes: [{ field: "status", from: previousStatus, to: status }],
+  });
 
   return user.toSafeObject();
 };
@@ -200,10 +257,28 @@ export const changeUserPermissions = async (actor, userId, { extraPermissions, d
     throw new ApiError(403, `You cannot grant permissions you do not hold: ${notDelegatable.join(", ")}`);
   }
 
+  const before = {
+    extraPermissions: [...user.extraPermissions],
+    deniedPermissions: [...user.deniedPermissions],
+  };
+
   if (extraPermissions !== undefined) user.extraPermissions = extraPermissions;
   if (deniedPermissions !== undefined) user.deniedPermissions = deniedPermissions;
 
   await user.save();
+
+  await recordUpdate({
+    action: AUDIT_ACTIONS.USER_PERMISSIONS_CHANGED,
+    entity: auditEntity(user),
+    actor,
+    before,
+    after: {
+      extraPermissions: [...user.extraPermissions],
+      deniedPermissions: [...user.deniedPermissions],
+    },
+    description: `Changed the permission overrides on ${user.email}`,
+  });
+
   return user.toSafeObject();
 };
 
@@ -215,9 +290,19 @@ export const deactivateUser = async (actor, userId) => {
   const user = await findUserOrFail(userId);
   assertCanManage(actor, user);
 
+  const previousStatus = user.status;
+
   user.status = USER_STATUSES.INACTIVE;
   await user.save();
   await revokeAllSessions(user._id, { reason: SESSION_REVOKE_REASONS.REVOKED_BY_ADMIN });
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.USER_STATUS_CHANGED,
+    entity: auditEntity(user),
+    actor,
+    description: `Deactivated the account ${user.email}`,
+    changes: [{ field: "status", from: previousStatus, to: USER_STATUSES.INACTIVE }],
+  });
 
   return user.toSafeObject();
 };
@@ -251,6 +336,15 @@ export const deleteUser = async (actor, userId, { confirmEmail }) => {
   // for them to point at.
   await Session.deleteMany({ user: user._id });
   await user.deleteOne();
+
+  // Recorded after the fact, and the label carries the email, because the
+  // account this points at no longer exists to be looked up.
+  await recordAudit({
+    action: AUDIT_ACTIONS.USER_DELETED,
+    entity: { type: AUDIT_ENTITIES.USER, id: null, label: deleted.email },
+    actor,
+    description: `Permanently deleted the ${deleted.role} account ${deleted.email}`,
+  });
 
   return { user: deleted, deleted: true };
 };

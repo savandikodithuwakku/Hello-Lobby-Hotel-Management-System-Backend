@@ -1,5 +1,6 @@
 import ApiError from "../../shared/utils/ApiError.js";
 import asyncHandler from "../../shared/utils/asyncHandler.js";
+import { updateRequestContext } from "../../shared/context/requestContext.js";
 import { verifyAccessToken } from "./utils/token.util.js";
 import User from "../user/user.model.js";
 import { LOGIN_BLOCKING_STATUSES, USER_STATUSES } from "../user/user.constants.js";
@@ -42,6 +43,10 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   }
 
   req.user = await loadAuthenticatedUser(token);
+  // The audit log records who did something without every service having to be
+  // handed the request, so the account goes into the request context here - the
+  // first point at which the token has actually been checked.
+  updateRequestContext({ user: req.user });
   next();
 });
 
@@ -55,6 +60,7 @@ export const optionalAuthenticate = asyncHandler(async (req, res, next) => {
   if (token) {
     try {
       req.user = await loadAuthenticatedUser(token);
+      updateRequestContext({ user: req.user });
     } catch {
       req.user = undefined;
     }

@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import env from "../../config/env.js";
 import ApiError from "../../shared/utils/ApiError.js";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
+import { recordAudit, recordAuditFailure } from "../audit/audit.service.js";
 import { hashToken } from "../../shared/utils/crypto.util.js";
 import { sendEmailSafely } from "../../shared/mail/mailer.js";
 import { getFrontendBaseUrl } from "../../config/app.config.js";
@@ -68,6 +70,22 @@ const issueSession = async (user, { device, userAgent, ipAddress }, rememberMe =
   };
 };
 
+
+/* -------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/*                                                                            */
+/* Signing in is recorded whether or not it worked. A single failed attempt is */
+/* someone mistyping their password; a run of them against one address is the  */
+/* clearest early sign of an account being attacked, and it is only visible if */
+/* the failures were written down at the time.                                 */
+/* -------------------------------------------------------------------------- */
+
+const auditEntity = (user, email = null) => ({
+  type: AUDIT_ENTITIES.USER,
+  id: user?._id ?? null,
+  label: user?.email ?? email ?? "",
+});
+
 export const registerUser = async ({ name, email, password, phone }) => {
   if (await User.exists({ email })) {
     throw new ApiError(409, "An account with this email already exists");
@@ -87,6 +105,13 @@ export const registerUser = async ({ name, email, password, phone }) => {
   await user.save();
 
   await sendVerificationEmail(user, verificationToken);
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.AUTH_REGISTER,
+    entity: auditEntity(user),
+    actor: user,
+    description: `${user.email} registered an account`,
+  });
 
   return user.toSafeObject();
 };
@@ -110,6 +135,13 @@ export const verifyEmail = async (token) => {
     to: user.email,
     subject: `Welcome to ${env.app.name}`,
     html: welcomeEmailTemplate({ name: user.name }),
+  });
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.AUTH_EMAIL_VERIFIED,
+    entity: auditEntity(user),
+    actor: user,
+    description: `${user.email} verified their email address`,
   });
 
   return user.toSafeObject();
@@ -138,16 +170,37 @@ export const loginUser = async ({ email, password, rememberMe = false }, context
   const invalidCredentials = new ApiError(401, "Invalid email or password");
 
   if (!user) {
+    // No account, so no id to point at - the address attempted is the record.
+    await recordAuditFailure({
+      action: AUDIT_ACTIONS.AUTH_LOGIN_FAILED,
+      entity: { type: AUDIT_ENTITIES.USER, id: null, label: email },
+      reason: "No account with that email address",
+      description: `Failed sign-in for ${email}`,
+    });
     throw invalidCredentials;
   }
 
   if (user.isLocked) {
     const minutesLeft = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
+    await recordAuditFailure({
+      action: AUDIT_ACTIONS.AUTH_LOGIN_FAILED,
+      entity: auditEntity(user),
+      reason: "The account is locked after too many failed attempts",
+      description: `Failed sign-in for ${user.email}`,
+    });
     throw new ApiError(423, `Account temporarily locked. Try again in ${minutesLeft} minute(s).`);
   }
 
   if (!(await user.comparePassword(password))) {
     const locked = await user.registerFailedLogin();
+
+    await recordAuditFailure({
+      action: AUDIT_ACTIONS.AUTH_LOGIN_FAILED,
+      entity: auditEntity(user),
+      reason: locked ? "Wrong password - the account is now locked" : "Wrong password",
+      description: `Failed sign-in for ${user.email}`,
+    });
+
     if (locked) {
       throw new ApiError(
         423,
@@ -169,6 +222,13 @@ export const loginUser = async ({ email, password, rememberMe = false }, context
   user.lastLoginAt = new Date();
   user.lastLoginIp = context.ipAddress;
   await user.save({ validateBeforeSave: false });
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.AUTH_LOGIN,
+    entity: auditEntity(user),
+    actor: user,
+    description: `${user.email} signed in`,
+  });
 
   return issueSession(user, context, rememberMe);
 };
@@ -244,6 +304,12 @@ export const logoutUser = async (refreshToken) => {
       { _id: decoded.sessionId, user: decoded.sub, revokedAt: null },
       { $set: { revokedAt: new Date(), revokedReason: SESSION_REVOKE_REASONS.LOGOUT } }
     );
+
+    await recordAudit({
+      action: AUDIT_ACTIONS.AUTH_LOGOUT,
+      entity: { type: AUDIT_ENTITIES.SESSION, id: decoded.sessionId, label: "" },
+      description: "Signed out",
+    });
   } catch {
     // A malformed or expired token still results in a successful logout:
     // the client cookie is cleared either way.
@@ -290,6 +356,12 @@ export const revokeSession = async (userId, sessionId) => {
   session.revokedAt = new Date();
   session.revokedReason = SESSION_REVOKE_REASONS.REVOKED_BY_USER;
   await session.save();
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.AUTH_SESSION_REVOKED,
+    entity: { type: AUDIT_ENTITIES.SESSION, id: session._id, label: session.device || "" },
+    description: `Signed out ${session.device || "a device"}`,
+  });
 
   return { alreadyRevoked: false };
 };
@@ -357,6 +429,15 @@ export const resetPassword = async ({ token, password }) => {
     html: passwordChangedTemplate({ name: user.name }),
   });
 
+  await recordAudit({
+    action: AUDIT_ACTIONS.AUTH_PASSWORD_RESET,
+    entity: auditEntity(user),
+    actor: user,
+    // The password itself is never recorded, here or anywhere - only the fact
+    // that it was reset, and from where.
+    description: `${user.email} reset their password with an emailed link`,
+  });
+
   return user.toSafeObject();
 };
 
@@ -384,6 +465,13 @@ export const changePassword = async ({ userId, currentPassword, newPassword }) =
     to: user.email,
     subject: `Your ${env.app.name} password was changed`,
     html: passwordChangedTemplate({ name: user.name }),
+  });
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.AUTH_PASSWORD_CHANGED,
+    entity: auditEntity(user),
+    actor: user,
+    description: `${user.email} changed their password`,
   });
 
   return user.toSafeObject();

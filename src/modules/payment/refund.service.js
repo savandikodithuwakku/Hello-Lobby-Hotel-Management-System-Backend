@@ -7,7 +7,10 @@ import { recordRefund as applyRefundToReservation } from "../reservation/reserva
 import Transaction from "./transaction.model.js";
 import { refundIssuedTemplate } from "./emails/refundIssued.template.js";
 import { getProviderByName } from "./providers/index.js";
+import { AUDIT_ACTIONS } from "../audit/audit.constants.js";
+import { recordAudit } from "../audit/audit.service.js";
 import {
+  auditTransaction,
   buildTransaction,
   loadCustomer,
   resolveInvoice,
@@ -230,6 +233,25 @@ export const issueRefund = async (actor, address, payload = {}) => {
       }),
     });
   }
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.PAYMENT_REFUNDED,
+    entity: auditTransaction(refund),
+    actor,
+    description:
+      `Refunded ${amount} ${invoice.currency} against ${invoice.reference}, reversing ` +
+      `${original.reference}`,
+    changes: [
+      {
+        field: "invoice.refunded",
+        from: String(money(invoice.amounts.refunded - amount)),
+        to: String(invoice.amounts.refunded),
+      },
+    ],
+    // The policy's own wording when nobody typed a reason, so an automatic
+    // refund is never left looking unexplained.
+    reason: payload.reason || quote.reason,
+  });
 
   return {
     invoice: (await syncInvoice(invoice)).toSafeObject(),

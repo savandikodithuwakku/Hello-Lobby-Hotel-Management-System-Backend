@@ -1,4 +1,6 @@
 import ApiError from "../../shared/utils/ApiError.js";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
+import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import { toId } from "../../shared/utils/id.util.js";
 import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive } from "../../shared/utils/text.util.js";
@@ -179,6 +181,26 @@ export const getRoomById = async (id) => {
 /* Writes                                                                     */
 /* -------------------------------------------------------------------------- */
 
+
+/* -------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** A room is named in the log by its number, which is how staff refer to it. */
+const auditEntity = (room) => ({
+  type: AUDIT_ENTITIES.ROOM,
+  id: room._id,
+  label: room.roomNumber,
+});
+
+const auditSnapshot = (room) => ({
+  roomNumber: room.roomNumber,
+  roomType: room.roomType?.name ?? toId(room.roomType),
+  floor: room.floor,
+  price: room.price,
+  facilities: [...room.facilities],
+});
+
 export const createRoom = async (actor, { roomNumber, roomType, floor, price, facilities, status, statusNote }) => {
   const normalisedNumber = roomNumber.trim().toUpperCase();
 
@@ -216,6 +238,13 @@ export const createRoom = async (actor, { roomNumber, roomType, floor, price, fa
 
   await room.save();
 
+  await recordAudit({
+    action: AUDIT_ACTIONS.ROOM_CREATED,
+    entity: auditEntity(room),
+    actor,
+    description: `Added room ${room.roomNumber} on floor ${room.floor}`,
+  });
+
   return getRoomById(room._id);
 };
 
@@ -225,6 +254,8 @@ export const createRoom = async (actor, { roomNumber, roomType, floor, price, fa
  */
 export const updateRoom = async (actor, id, { roomNumber, roomType, floor, price, facilities }) => {
   const room = await findRoomOrFail(id);
+
+  const before = auditSnapshot(room);
 
   if (roomNumber !== undefined) {
     const normalisedNumber = roomNumber.trim().toUpperCase();
@@ -259,6 +290,15 @@ export const updateRoom = async (actor, id, { roomNumber, roomType, floor, price
 
   room.updatedBy = actor._id;
   await room.save();
+
+  await recordUpdate({
+    action: AUDIT_ACTIONS.ROOM_UPDATED,
+    entity: auditEntity(room),
+    actor,
+    before,
+    after: auditSnapshot(await findRoomOrFail(room._id)),
+    description: `Edited room ${room.roomNumber}`,
+  });
 
   return getRoomById(room._id);
 };
@@ -303,9 +343,20 @@ export const changeRoomStatus = async (actor, id, { status, note }) => {
     );
   }
 
+  const previousStatus = room.status;
+
   applyStatus(room, status, { note, actorId: actor._id });
   room.updatedBy = actor._id;
   await room.save();
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.ROOM_STATUS_CHANGED,
+    entity: auditEntity(room),
+    actor,
+    description: `Room ${room.roomNumber}: ${previousStatus} to ${status}`,
+    changes: [{ field: "status", from: previousStatus, to: status }],
+    reason: note || "",
+  });
 
   return getRoomById(room._id);
 };
@@ -335,6 +386,14 @@ export const deactivateRoom = async (actor, id, { note } = {}) => {
   });
   room.updatedBy = actor._id;
   await room.save();
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.ROOM_DEACTIVATED,
+    entity: auditEntity(room),
+    actor,
+    description: `Took room ${room.roomNumber} out of the inventory`,
+    reason: note || "",
+  });
 
   return getRoomById(room._id);
 };
@@ -367,6 +426,13 @@ export const restoreRoom = async (actor, id) => {
   });
   room.updatedBy = actor._id;
   await room.save();
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.ROOM_RESTORED,
+    entity: auditEntity(room),
+    actor,
+    description: `Returned room ${room.roomNumber} to the inventory`,
+  });
 
   return getRoomById(room._id);
 };

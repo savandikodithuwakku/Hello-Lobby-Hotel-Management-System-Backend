@@ -5,6 +5,8 @@ import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive, humanise } from "../../shared/utils/text.util.js";
 import { toDateString } from "../../shared/utils/date.util.js";
 import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
+import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import User from "../user/user.model.js";
 import Room from "../room/room.model.js";
 import { ROOM_STATUSES } from "../room/room.constants.js";
@@ -33,6 +35,38 @@ const withRelations = (query) =>
     .populate("customer", "name email phone")
     .populate("room", "roomNumber floor status")
     .populate("roomType", "name maxOccupancy");
+
+/* -------------------------------------------------------------------------- */
+/* Audit                                                                      */
+/* -------------------------------------------------------------------------- */
+
+/** How a booking is named in the audit log. */
+const auditEntity = (reservation) => ({
+  type: AUDIT_ENTITIES.RESERVATION,
+  id: reservation._id,
+  label: reservation.reference,
+});
+
+/**
+ * The parts of a booking worth recording a change to.
+ *
+ * Written out as readable values rather than raw ids - a log saying the room
+ * went from 501 to 302 is useful, one saying it went from one ObjectId to
+ * another is not.
+ */
+const auditSnapshot = (reservation) => ({
+  checkIn: reservation.checkIn,
+  checkOut: reservation.checkOut,
+  nights: reservation.nights,
+  guests: reservation.guests,
+  room: reservation.room?.roomNumber ?? toId(reservation.room),
+  specialRequests: reservation.specialRequests,
+  services: reservation.additionalServices.map(
+    (service) => `${service.name} x${service.quantity}`
+  ),
+  totalAmount: reservation.pricing.totalAmount,
+  advanceAmount: reservation.payment.advanceAmount,
+});
 
 /* -------------------------------------------------------------------------- */
 /* Access                                                                     */
@@ -198,6 +232,15 @@ export const createReservation = async (actor, payload) => {
   await resolveInsertRace(reservation);
 
   await holdRoomIfCurrent(reservation, actor._id);
+
+  await recordAudit({
+    action: AUDIT_ACTIONS.RESERVATION_CREATED,
+    entity: auditEntity(reservation),
+    actor,
+    description:
+      `Booked room ${room.roomNumber} for ${toDateString(stay.checkIn)} to ` +
+      `${toDateString(stay.checkOut)} at ${reservation.pricing.totalAmount}`,
+  });
 
   return getReservationById(reservation._id, actor);
 };
@@ -378,6 +421,10 @@ export const updateReservation = async (actor, id, payload) => {
     );
   }
 
+  // Taken before anything is touched, so the audit entry can say what the
+  // booking looked like beforehand rather than only what it looks like now.
+  const before = auditSnapshot(reservation);
+
   const datesChanged = payload.checkIn !== undefined || payload.checkOut !== undefined;
   const roomChanged =
     payload.room !== undefined &&
@@ -434,6 +481,19 @@ export const updateReservation = async (actor, id, payload) => {
   reservation.updatedBy = actor._id;
   await reservation.save();
 
+  // Editing used to leave no trace at all: dates could be moved and the only
+  // record of it was that `updatedAt` had changed. This is that gap closed.
+  const updated = await findReservationOrFail(reservation._id);
+
+  await recordUpdate({
+    action: AUDIT_ACTIONS.RESERVATION_UPDATED,
+    entity: auditEntity(reservation),
+    actor,
+    before,
+    after: auditSnapshot(updated),
+    description: `Edited booking ${reservation.reference}`,
+  });
+
   return getReservationById(reservation._id, actor);
 };
 
@@ -455,10 +515,24 @@ const assertTransition = (reservation, next) => {
 
 const applyTransition = async (reservation, next, { actor, note = "" }) => {
   assertTransition(reservation, next);
+
+  const from = reservation.status;
+
   reservation.status = next;
   reservation.updatedBy = actor._id;
   reservation.recordHistory(next, { by: actor._id, note });
   await reservation.save();
+
+  // Every transition goes through here, so recording it once covers confirming,
+  // cancelling, checking in and out, completing and no-shows alike.
+  await recordAudit({
+    action: AUDIT_ACTIONS.RESERVATION_STATUS_CHANGED,
+    entity: auditEntity(reservation),
+    actor,
+    description: `Booking ${reservation.reference}: ${humanise(from)} to ${humanise(next)}`,
+    changes: [{ field: "status", from, to: next }],
+    reason: note,
+  });
 };
 
 /** The advance is in, so the room is held for the guest. */

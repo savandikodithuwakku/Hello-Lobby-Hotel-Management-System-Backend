@@ -66,6 +66,15 @@ export const env = Object.freeze({
     cookieDomain: process.env.COOKIE_DOMAIN || undefined,
   },
 
+  audit: {
+    /**
+     * How long audit entries are kept, in days. Zero keeps them for good, which
+     * is the default: a hotel that has to purge records after a fixed period
+     * sets this, everyone else should not lose their history by accident.
+     */
+    retentionDays: toNumber(process.env.AUDIT_RETENTION_DAYS, 0),
+  },
+
   payment: {
     /**
      * Which provider handles online payments.

@@ -65,6 +65,9 @@ const ADMIN_PERMISSIONS = [
   PERMISSIONS.REPORT_VIEW,
   PERMISSIONS.REPORT_EXPORT,
   PERMISSIONS.ANALYTICS_VIEW,
+  // Administrators can read the audit log. It shows who did what from which
+  // address across the whole system, so it stops at admin - staff never see it.
+  PERMISSIONS.AUDIT_LOG_VIEW,
 ];
 
 /**
