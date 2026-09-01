@@ -4,7 +4,7 @@ import { money } from "../../shared/utils/money.util.js";
 import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive, humanise } from "../../shared/utils/text.util.js";
 import { toDateString } from "../../shared/utils/date.util.js";
-import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { PERMISSIONS } from "../auth/rbac/index.js";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
 import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import User from "../user/user.model.js";

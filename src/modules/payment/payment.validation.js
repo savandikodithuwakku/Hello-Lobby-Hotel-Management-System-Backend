@@ -31,7 +31,6 @@ const addressValidation = (paramName) =>
     ? mongoIdParam("reservationId", "reservation")
     : mongoIdParam("id", "invoice");
 
-export const invoiceIdValidation = mongoIdParam("id", "invoice");
 export const transactionIdValidation = mongoIdParam("id", "payment");
 
 const noteField = (field = "note", label = "Note") => noteBody(field, POLICY.NOTE_MAX, label);

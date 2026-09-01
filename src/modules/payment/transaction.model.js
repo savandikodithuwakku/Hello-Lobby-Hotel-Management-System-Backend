@@ -12,6 +12,7 @@ import {
   TRANSACTION_STATUSES,
   TRANSACTION_STATUS_VALUES,
 } from "./payment.constants.js";
+import { noteField, referenceField } from "../../shared/database/schemaFields.js";
 
 /**
  * One movement of money against a bill.
@@ -28,13 +29,7 @@ import {
 const transactionSchema = new mongoose.Schema(
   {
     /** Human-readable receipt number, e.g. TXN-20260826-4F7A. */
-    reference: {
-      type: String,
-      required: true,
-      unique: true,
-      uppercase: true,
-      trim: true,
-    },
+    reference: referenceField(),
     invoice: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Invoice",
@@ -119,12 +114,7 @@ const transactionSchema = new mongoose.Schema(
     /** A started online checkout is abandoned if it is not finished by then. */
     expiresAt: { type: Date, default: null },
     failureReason: { type: String, trim: true, default: "" },
-    note: {
-      type: String,
-      trim: true,
-      maxlength: [POLICY.NOTE_MAX, "Note is too long"],
-      default: "",
-    },
+    note: noteField(POLICY.NOTE_MAX),
   },
   { timestamps: true }
 );

@@ -1,7 +1,7 @@
 import ApiError from "../../shared/utils/ApiError.js";
 import { toId } from "../../shared/utils/id.util.js";
 import { toDateString } from "../../shared/utils/date.util.js";
-import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { PERMISSIONS } from "../auth/rbac/index.js";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
 import { recordAudit } from "../audit/audit.service.js";
 import Room from "../room/room.model.js";

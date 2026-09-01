@@ -31,6 +31,12 @@ export const getTicketOptions = asyncHandler(async (req, res) => {
   });
 });
 
+/** Who a ticket can be handed to. See `listAssignableStaff`. */
+export const getAssignableStaff = asyncHandler(async (req, res) => {
+  const result = await ticketService.listAssignableStaff();
+  sendOk(res, "Assignable staff fetched", result);
+});
+
 export const getTicket = asyncHandler(async (req, res) => {
   const ticket = await ticketService.getTicketById(req.params.id, req.user);
   sendOk(res, "Ticket fetched successfully", { ticket });

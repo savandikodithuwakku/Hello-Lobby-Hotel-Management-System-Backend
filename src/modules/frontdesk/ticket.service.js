@@ -2,10 +2,11 @@ import ApiError from "../../shared/utils/ApiError.js";
 import { toId } from "../../shared/utils/id.util.js";
 import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive, humanise } from "../../shared/utils/text.util.js";
-import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { PERMISSIONS, getRolePermissions } from "../auth/rbac/index.js";
 import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
 import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import User from "../user/user.model.js";
+import { USER_ROLES, USER_STATUSES } from "../user/user.constants.js";
 import Room from "../room/room.model.js";
 import { HOUSEKEEPING_STATUSES } from "../room/room.constants.js";
 import { changeHousekeepingStatus } from "../room/room.service.js";
@@ -325,6 +326,35 @@ export const getTicketStatistics = async () => {
     /** Nobody has picked these up and the response target has passed. */
     overdue,
     unassigned,
+  };
+};
+
+/**
+ * The people a ticket can be given to.
+ *
+ * Its own endpoint rather than the user directory, for two reasons. Somebody
+ * who works tickets holds `frontdesk:ticket_manage` but usually not
+ * `user:read`, so the directory would be closed to exactly the people who need
+ * this list. And "who can be given a ticket" is this module's own question: it
+ * means whoever can work one, which is not the same as any particular role.
+ *
+ * Roles only narrow the query. The permission itself is then checked per
+ * account, so a per-user grant or denial is respected rather than assumed away.
+ */
+export const listAssignableStaff = async () => {
+  const roles = Object.values(USER_ROLES).filter((role) =>
+    getRolePermissions(role).includes(PERMISSIONS.FRONTDESK_TICKET_MANAGE)
+  );
+
+  const candidates = await User.find({
+    role: { $in: roles },
+    status: USER_STATUSES.ACTIVE,
+  }).sort("name");
+
+  return {
+    staff: candidates
+      .filter((user) => user.hasPermission(PERMISSIONS.FRONTDESK_TICKET_MANAGE))
+      .map((user) => ({ id: user._id.toString(), name: user.name, role: user.role })),
   };
 };
 

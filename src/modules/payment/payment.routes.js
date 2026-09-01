@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../auth/auth.middleware.js";
 import { requirePermission } from "../auth/rbac/rbac.middleware.js";
-import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { PERMISSIONS } from "../auth/rbac/index.js";
 import { validateRequest } from "../../shared/middleware/validate.middleware.js";
 import { paymentCallbackRateLimiter } from "../../shared/middleware/rateLimit.middleware.js";
 import * as paymentController from "./payment.controller.js";

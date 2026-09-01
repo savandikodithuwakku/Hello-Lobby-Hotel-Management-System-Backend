@@ -113,12 +113,6 @@ export const ACTIVE_TICKET_STATUSES = Object.freeze([
   TICKET_STATUSES.ON_HOLD,
 ]);
 
-/** Nothing further happens to a ticket in one of these. */
-export const TERMINAL_TICKET_STATUSES = Object.freeze([
-  TICKET_STATUSES.CLOSED,
-  TICKET_STATUSES.CANCELLED,
-]);
-
 /**
  * The state machine. Every move is explicit; anything not listed is refused
  * with a message naming what is actually possible.

@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authenticate } from "../auth/auth.middleware.js";
 import { requirePermission } from "../auth/rbac/rbac.middleware.js";
-import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { PERMISSIONS } from "../auth/rbac/index.js";
 import { validateRequest } from "../../shared/middleware/validate.middleware.js";
 import * as ticketController from "./ticket.controller.js";
 import {
@@ -36,6 +36,13 @@ router.get(
 );
 
 router.get("/options", requirePermission(...READ_TICKETS), ticketController.getTicketOptions);
+
+/** The assignee picker. Staff only - a guest has nobody to hand a ticket to. */
+router.get(
+  "/assignees",
+  requirePermission(PERMISSIONS.FRONTDESK_TICKET_MANAGE),
+  ticketController.getAssignableStaff
+);
 
 router.get(
   "/",

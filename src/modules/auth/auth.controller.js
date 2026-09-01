@@ -3,8 +3,7 @@ import asyncHandler from "../../shared/utils/asyncHandler.js";
 import { getRequestContext } from "../../shared/utils/request.util.js";
 import { verifyRefreshToken } from "./utils/token.util.js";
 import { clearRefreshCookie, readRefreshCookie, setRefreshCookie } from "./utils/cookie.util.js";
-import { ROLE_PERMISSIONS } from "./rbac/roles.js";
-import { PERMISSIONS } from "./rbac/permissions.js";
+import { PERMISSIONS, ROLE_PERMISSIONS } from "./rbac/index.js";
 import { AUTH_MESSAGES } from "./auth.constants.js";
 import * as authService from "./auth.service.js";
 

@@ -3,7 +3,7 @@ import { AUDIT_ACTIONS, AUDIT_ENTITIES } from "../audit/audit.constants.js";
 import { recordAudit, recordUpdate } from "../audit/audit.service.js";
 import { paginateQuery } from "../../shared/utils/pagination.util.js";
 import { containsInsensitive, equalsInsensitive } from "../../shared/utils/text.util.js";
-import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { PERMISSIONS } from "../auth/rbac/index.js";
 import RoomType from "./roomType.model.js";
 import Room from "./room.model.js";
 import { DEFAULT_ROOM_TYPE_SORT } from "./room.constants.js";

@@ -3,8 +3,7 @@ import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import env from "../../config/env.js";
 import { hashToken } from "../../shared/utils/crypto.util.js";
-import { resolvePermissions } from "../auth/rbac/roles.js";
-import { PERMISSION_VALUES } from "../auth/rbac/permissions.js";
+import { PERMISSION_VALUES, resolvePermissions } from "../auth/rbac/index.js";
 import {
   USER_ROLE_VALUES,
   USER_ROLES,

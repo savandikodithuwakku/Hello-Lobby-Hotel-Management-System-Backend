@@ -8,7 +8,7 @@ import {
   searchRule,
   sortRule,
 } from "../../shared/validators/common.validators.js";
-import { PERMISSION_VALUES } from "../auth/rbac/permissions.js";
+import { PERMISSION_VALUES } from "../auth/rbac/index.js";
 import { USER_ROLE_VALUES, USER_SORT_OPTIONS, USER_STATUS_VALUES } from "./user.constants.js";
 
 export const userIdValidation = mongoIdParam("id", "user");

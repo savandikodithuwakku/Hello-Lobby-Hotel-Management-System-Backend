@@ -47,6 +47,4 @@ export const manualProvider = assertProviderShape({
   parseCallback: callbacksNotSupported("manual"),
 });
 
-export const MANUAL_SETTLED_STATUS = TRANSACTION_STATUSES.SUCCESS;
-
 export default manualProvider;

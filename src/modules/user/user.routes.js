@@ -2,7 +2,7 @@ import { Router } from "express";
 import { authenticate } from "../auth/auth.middleware.js";
 import { validateRequest } from "../../shared/middleware/validate.middleware.js";
 import { requirePermission } from "../auth/rbac/rbac.middleware.js";
-import { PERMISSIONS } from "../auth/rbac/permissions.js";
+import { PERMISSIONS } from "../auth/rbac/index.js";
 import * as userController from "./user.controller.js";
 import {
   changePermissionsValidation,

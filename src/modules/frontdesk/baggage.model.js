@@ -6,6 +6,7 @@ import {
   POLICY,
   deriveBaggageStatus,
 } from "./baggage.constants.js";
+import { noteField, referenceField } from "../../shared/database/schemaFields.js";
 
 /**
  * One lot of baggage held at the desk.
@@ -27,13 +28,7 @@ const baggageSchema = new mongoose.Schema(
      * Deliberately not the database id: it has to be short enough to write on a
      * paper tag and read back over a desk.
      */
-    tag: {
-      type: String,
-      required: true,
-      unique: true,
-      uppercase: true,
-      trim: true,
-    },
+    tag: referenceField(),
 
     /** The account, when the person has one. */
     guest: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null, index: true },
@@ -96,12 +91,7 @@ const baggageSchema = new mongoose.Schema(
       default: "",
     },
 
-    note: {
-      type: String,
-      trim: true,
-      maxlength: [POLICY.NOTE_MAX, "Note is too long"],
-      default: "",
-    },
+    note: noteField(POLICY.NOTE_MAX),
 
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     updatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },

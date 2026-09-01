@@ -60,9 +60,6 @@ export const TRANSACTION_STATUSES = Object.freeze({
 
 export const TRANSACTION_STATUS_VALUES = Object.freeze(Object.values(TRANSACTION_STATUSES));
 
-/** Only a successful transaction counts towards what has been paid. */
-export const SETTLED_TRANSACTION_STATUSES = Object.freeze([TRANSACTION_STATUSES.SUCCESS]);
-
 /** Statuses a transaction can still move on from. Anything else is final. */
 export const OPEN_TRANSACTION_STATUSES = Object.freeze([TRANSACTION_STATUSES.PENDING]);
 
@@ -167,8 +164,6 @@ export const REFUND_POLICIES = Object.freeze({
   /** Nothing comes back once it has been paid. */
   NEVER: "never",
 });
-
-export const REFUND_POLICY_VALUES = Object.freeze(Object.values(REFUND_POLICIES));
 
 export const POLICY = Object.freeze({
   /**

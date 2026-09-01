@@ -43,8 +43,6 @@ const OUTCOMES = Object.freeze({
   cancelled: TRANSACTION_STATUSES.CANCELLED,
 });
 
-export const SIMULATED_OUTCOMES = Object.freeze(Object.keys(OUTCOMES));
-
 export const outcomeToStatus = (outcome) => OUTCOMES[outcome] ?? null;
 
 const newProviderReference = (prefix) =>

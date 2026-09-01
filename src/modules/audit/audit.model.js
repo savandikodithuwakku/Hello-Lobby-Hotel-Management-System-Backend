@@ -132,12 +132,18 @@ if (env.audit.retentionDays > 0) {
  * that would change or remove an entry is closed off here. Mongoose has several
  * such routes and each has to be named; missing one would leave a way in.
  */
-const refuseChange = function refuseChange(next) {
-  next(new Error("Audit log entries cannot be modified"));
+// Mongoose 9 drives middleware by the returned promise: hooks take no `next`,
+// and a hook refuses by throwing. Written with a `next` callback these did not
+// merely fail to guard the log - `next` was undefined, so every hook threw,
+// including on the writes that were supposed to succeed. `recordAudit` catches
+// and logs failures so that recording something can never undo the thing
+// itself, which is right, and which is also what hid this for so long.
+const refuseChange = function refuseChange() {
+  throw new Error("Audit log entries cannot be modified");
 };
 
-const refuseRemoval = function refuseRemoval(next) {
-  next(new Error("Audit log entries cannot be deleted"));
+const refuseRemoval = function refuseRemoval() {
+  throw new Error("Audit log entries cannot be deleted");
 };
 
 ["updateOne", "updateMany", "findOneAndUpdate", "replaceOne"].forEach((operation) => {
@@ -148,11 +154,10 @@ const refuseRemoval = function refuseRemoval(next) {
   auditLogSchema.pre(operation, refuseRemoval);
 });
 
-auditLogSchema.pre("save", function preventEdit(next) {
+auditLogSchema.pre("save", function preventEdit() {
   if (!this.isNew) {
-    return next(new Error("Audit log entries cannot be modified"));
+    throw new Error("Audit log entries cannot be modified");
   }
-  return next();
 });
 
 auditLogSchema.methods.toSafeObject = function toSafeObject() {

@@ -8,6 +8,7 @@ import {
   RESERVATION_STATUS_VALUES,
   nightsBetween,
 } from "./reservation.constants.js";
+import { referenceField } from "../../shared/database/schemaFields.js";
 
 const serviceSchema = new mongoose.Schema(
   {
@@ -54,13 +55,7 @@ const historySchema = new mongoose.Schema(
 const reservationSchema = new mongoose.Schema(
   {
     /** Human-readable booking reference, e.g. RSV-20260826-4F7A. */
-    reference: {
-      type: String,
-      required: true,
-      unique: true,
-      uppercase: true,
-      trim: true,
-    },
+    reference: referenceField(),
     customer: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -332,8 +327,6 @@ export const generateReference = (date = new Date()) => {
   const random = Math.random().toString(36).slice(2, 6).toUpperCase();
   return `RSV-${stamp}-${random}`;
 };
-
-export const calculateNights = nightsBetween;
 
 export const Reservation = mongoose.model("Reservation", reservationSchema);
 export default Reservation;

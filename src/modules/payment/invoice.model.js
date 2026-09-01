@@ -10,6 +10,7 @@ import {
   deriveInvoiceStatus,
   netPaid,
 } from "./payment.constants.js";
+import { noteField, referenceField } from "../../shared/database/schemaFields.js";
 
 /**
  * One thing the guest consumed during their stay.
@@ -43,12 +44,7 @@ const chargeSchema = new mongoose.Schema(
     reverses: { type: mongoose.Schema.Types.ObjectId, default: null },
     postedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
     postedAt: { type: Date, default: Date.now },
-    note: {
-      type: String,
-      trim: true,
-      maxlength: [POLICY.NOTE_MAX, "Note is too long"],
-      default: "",
-    },
+    note: noteField(POLICY.NOTE_MAX),
   },
   { _id: true }
 );
@@ -68,13 +64,7 @@ const chargeSchema = new mongoose.Schema(
 const invoiceSchema = new mongoose.Schema(
   {
     /** Human-readable bill number, e.g. INV-20260826-4F7A. */
-    reference: {
-      type: String,
-      required: true,
-      unique: true,
-      uppercase: true,
-      trim: true,
-    },
+    reference: referenceField(),
     /** One invoice per booking - the unique index is what enforces that. */
     reservation: {
       type: mongoose.Schema.Types.ObjectId,

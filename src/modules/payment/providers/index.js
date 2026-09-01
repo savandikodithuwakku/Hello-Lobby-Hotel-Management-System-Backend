@@ -15,9 +15,6 @@ const ONLINE_PROVIDERS = Object.freeze({
   [simulatedProvider.name]: simulatedProvider,
 });
 
-/** Money taken in person always goes through the manual provider. */
-export const getManualProvider = () => manualProvider;
-
 /** The gateway currently configured for online payments. */
 export const getOnlineProvider = () => {
   const provider = ONLINE_PROVIDERS[env.payment.provider];

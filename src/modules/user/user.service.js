@@ -7,7 +7,7 @@ import env from "../../config/env.js";
 import { sendEmailSafely } from "../../shared/mail/mailer.js";
 import { getFrontendBaseUrl } from "../../config/app.config.js";
 import { forgotPasswordTemplate } from "../auth/emails/forgotPassword.template.js";
-import { roleCanActOn } from "../auth/rbac/roles.js";
+import { roleCanActOn } from "../auth/rbac/index.js";
 import { revokeAllSessions } from "../auth/auth.service.js";
 import Session, { SESSION_REVOKE_REASONS } from "../auth/session.model.js";
 import { PASSWORD_RESET_TOKEN_EXPIRES_MINUTES } from "../auth/auth.constants.js";

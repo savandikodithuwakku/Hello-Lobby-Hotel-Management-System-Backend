@@ -11,6 +11,7 @@ import {
   isTicketOverdue,
   responseTargetFor,
 } from "./ticket.constants.js";
+import { referenceField } from "../../shared/database/schemaFields.js";
 
 /** One thing that happened to the ticket, in order. */
 const updateSchema = new mongoose.Schema(
@@ -38,13 +39,7 @@ const updateSchema = new mongoose.Schema(
 const ticketSchema = new mongoose.Schema(
   {
     /** Human-readable ticket number, e.g. TKT-20260826-4F7A. */
-    reference: {
-      type: String,
-      required: true,
-      unique: true,
-      uppercase: true,
-      trim: true,
-    },
+    reference: referenceField(),
     subject: {
       type: String,
       required: [true, "A ticket needs a subject"],
